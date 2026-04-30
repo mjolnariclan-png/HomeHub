@@ -25,7 +25,11 @@
         <button type="button" id="showLogin" class="btn btn-primary" style="flex:1;">Login</button>
         <button type="button" id="showSignup" class="btn btn-ghost" style="flex:1;">Sign Up</button>
         </div>
-
+        <script>
+        if (typeof navigator.serviceWorker !== 'undefined') {
+            navigator.serviceWorker.register('sw.js')
+        }
+        </script>
         <!-- 🔵 LOGIN FORM -->
         <form id="loginForm">
         <input id="loginEmail" class="form-input" placeholder="Email" style="margin-bottom:12px;" />

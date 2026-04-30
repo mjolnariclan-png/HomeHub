@@ -1,10 +1,10 @@
 {
-  "name": "HomeHub",
-  "short_name": "HomeHub",
+  "name": "Family Assistant",
+  "short_name": "FamHub",
   "start_url": "mjolnariclan-png.github.io/HomeHub/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#6366f1",
+  "background_color": "#004bfd",
+  "theme_color": "#7d0000",
   "icons": [
     {
       "src": "icon-192.png",
@@ -32,5 +32,8 @@
     "photo",
     "shopping",
     "utilities"
-  ]
+  ],
+  "id": "HomeHub",
+  "description": "Keep track of Chores, Shopping, To-Do items, Recipes, Calendars, Budgets.",
+  "iarc_rating_id": "E"
 }
