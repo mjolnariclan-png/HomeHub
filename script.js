@@ -446,6 +446,11 @@ async function initApp() {
         return;
     }
 
+    const urlParams = new URLSearchParams(window.location.search);
+    const page = urlParams.get('page');
+    if (page) {
+        navigateTo(page);
+    }
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (session) {
         await bootstrapUser(session.user.id);

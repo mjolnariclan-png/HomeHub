@@ -7,11 +7,26 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+        <script>
+        window.OneSignalDeferred = window.OneSignalDeferred || [];
+        OneSignalDeferred.push(async function(OneSignal) {
+            await OneSignal.init({
+                appId: "a852ae54-e345-4bb6-8c85-8275814974df",
+            });
+        });
+        </script>
+    
+    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
     <script>
     window.OneSignalDeferred = window.OneSignalDeferred || [];
     OneSignalDeferred.push(async function(OneSignal) {
         await OneSignal.init({
         appId: "a852ae54-e345-4bb6-8c85-8275814974df",
+        safari_web_id: "web.onesignal.auto.40785b5b-169b-4884-a5e0-8aeabe17c634",
+        notifyButton: {
+            enable: true,
+        },
+        allowLocalhostAsSecureOrigin: true,
         });
     });
     </script>
@@ -71,6 +86,7 @@
                     <span class="nav-icon">📊</span>
                     <span>Dashboard</span>
                 </button>
+                <div class='onesignal-customlink-container'></div>
                 <button class="nav-item" data-page="chores" onclick="navigateTo('chores')">
                     <span class="nav-icon">🧹</span>
                     <span>Chore List</span>
