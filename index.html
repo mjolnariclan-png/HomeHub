@@ -7,16 +7,22 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
-    <script>
-    window.OneSignalDeferred = window.OneSignalDeferred || [];
-    OneSignalDeferred.push(async function(OneSignal) {
-        await OneSignal.init({
-        appId: "a852ae54-e345-4bb6-8c85-8275814974df",
-        notifyButton: { enable: false },
-        allowLocalhostAsSecureOrigin: true,
+        <script>
+        window.OneSignalDeferred = window.OneSignalDeferred || [];
+        OneSignalDeferred.push(async function(OneSignal) {
+            try {
+            await OneSignal.init({
+                appId: "a852ae54-e345-4bb6-8c85-8275814974df",
+                safari_web_id: "web.onesignal.auto.40785b5b-169b-4884-a5e0-8aeabe17c634",
+                notifyButton: { enable: false }, // We use our own bell
+                allowLocalhostAsSecureOrigin: true, // For local testing
+            });
+            console.log('OneSignal initialized');
+            } catch (e) {
+            console.warn('OneSignal init warning:', e.message);
+            }
         });
-    });
-    </script>
+        </script>
 
 </head>
 <body>

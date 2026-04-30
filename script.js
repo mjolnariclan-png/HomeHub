@@ -489,7 +489,12 @@ async function login(e) {
 async function linkOneSignalUser(userId) {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   window.OneSignalDeferred.push(async function(OneSignal) {
-    await OneSignal.login(userId); // Links push subscription to this user
+    try {
+      await OneSignal.setExternalUserId(userId);
+      console.log('OneSignal linked to user:', userId);
+    } catch (e) {
+      console.warn('OneSignal link failed:', e.message);
+    }
   });
 }
 
