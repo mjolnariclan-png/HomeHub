@@ -35,14 +35,8 @@ const store = {
 };
 async function sendPushToUsers(title, message, targetUserIds, deepLink = null) {
   try {
-    const filters = targetUserIds.flatMap((id, index) => {
-      const filter = { field: "tag", key: "user_id", relation: "=", value: id };
-      if (index < targetUserIds.length - 1) {
-        return [filter, { operator: "OR" }];
-      }
-      return [filter];
-    });
-
+    // Use player IDs instead of tags for more reliable targeting
+    // Or keep tags if your Edge Function supports them
     await fetch(`${SUPABASE_URL}/functions/v1/push-notification`, {
       method: 'POST',
       headers: {
@@ -52,7 +46,7 @@ async function sendPushToUsers(title, message, targetUserIds, deepLink = null) {
       body: JSON.stringify({
         title,
         message,
-        filters,
+        targetUserIds,  // Pass raw IDs, let Edge Function handle lookup
         url: deepLink
       })
     });
@@ -445,12 +439,6 @@ async function initApp() {
         document.getElementById('contentArea').innerHTML = '<div style="text-align:center;padding:60px;"><h2 style="color:var(--danger)">Connection Error</h2></div>';
         return;
     }
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const page = urlParams.get('page');
-    if (page) {
-        navigateTo(page);
-    }
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (session) {
         await bootstrapUser(session.user.id);
@@ -489,7 +477,18 @@ async function login(e) {
 
         // proceed to app
         showApp();
+        // Handle deep links from push notifications
+        function handleDeepLink() {
+            const params = new URLSearchParams(window.location.search);
+            const page = params.get('page');
+            if (page && ['dashboard','chores','shopping','todo','recipes','store','calendar','leaderboard','messages','budget','admin'].includes(page)) {
+                // Wait for auth to complete, then navigate
+                setTimeout(() => navigateTo(page), 500);
+            }
+        }
 
+// Call this after bootstrapUser completes
+// Or add to the end of showApp()
     } catch (err) {
         alert(err.message);
     } finally {
