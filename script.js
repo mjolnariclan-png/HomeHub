@@ -34,6 +34,24 @@ const store = {
     currentPage: 'login'
 };
 
+
+let signupMode = 'create';
+
+function setSignupMode(mode) {
+    signupMode = mode;
+
+    const familyName = document.getElementById('familyName');
+    const familyCode = document.getElementById('familyCode');
+
+    if (mode === 'create') {
+        familyName.style.display = 'block';
+        familyCode.style.display = 'none';
+    } else {
+        familyName.style.display = 'none';
+        familyCode.style.display = 'block';
+    }
+}
+
 // ==================== USER COLOR MAP ====================
 function getUserColor(userId) {
     const member = store.familyMembers.find(m => m.id === userId);
@@ -178,20 +196,30 @@ async function initApp() {
     });
 }
 
-async function login() {
-    const email = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
-    if (!email || !password) { alert('Enter email and password'); return; }
+async function login(e) {
+    e.preventDefault();
 
-    const btn = event.target;
-    btn.textContent = 'Signing in...';
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+
+    const btn = e.submitter;
+    btn.textContent = 'Logging in...';
     btn.disabled = true;
 
     try {
-        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        const { error } = await supabaseClient.auth.signInWithPassword({
+            email,
+            password
+        });
+
         if (error) throw error;
+
+        // proceed to app
+        showApp();
+
     } catch (err) {
-        alert('Login failed: ' + err.message);
+        alert(err.message);
+    } finally {
         btn.textContent = 'Login';
         btn.disabled = false;
     }
@@ -224,230 +252,131 @@ function setSignupMode(mode) {
     }
 }
 
-async function signup() {
-    const email = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
+async function signup(e) {
+    e.preventDefault();
+
+    const email = document.getElementById('signupEmail').value.trim();
+    const password = document.getElementById('signupPassword').value;
     const familyName = document.getElementById('familyName').value.trim();
     const familyCode = document.getElementById('familyCode').value.trim();
 
-    if (!email || !password) { alert('Email and password required'); return; }
-    if (password.length < 6) { alert('Password must be 6+ characters'); return; }
-
-    const btn = event.target;
+    const btn = e.submitter;
     btn.textContent = 'Creating...';
     btn.disabled = true;
 
     try {
-        console.log('STEP 1: Creating auth user...');
-        const { data: authData, error: authError } = await supabaseClient.auth.signUp({ email, password });
-        if (authError) {
-            console.error('Auth signup failed:', authError);
-            throw authError;
-        }
-        console.log('Auth user created:', authData.user.id);
+        const { data, error } = await supabaseClient.auth.signUp({ email, password });
+        if (error) throw error;
 
-        const userId = authData.user.id;
-        const username = email.split('@')[0];
-        const displayName = email.split('@')[0];
-        let familyId = null;
+        const userId = data.user.id;
 
         if (signupMode === 'create') {
-            console.log('STEP 2: Creating family...');
-            
-            // Try RPC first
-            try {
-                console.log('Trying RPC create_family_and_admin...');
-                const { data: rpcFamilyId, error: rpcError } = await supabaseClient.rpc('create_family_and_admin', {
-                    p_user_id: userId,
-                    p_family_name: familyName || 'My Family',
-                    p_username: username,
-                    p_display_name: displayName
-                });
-                if (rpcError) {
-                    console.error('RPC error:', rpcError);
-                } else {
-                    familyId = rpcFamilyId;
-                    console.log('RPC succeeded, familyId:', familyId);
-                }
-            } catch (rpcErr) {
-                console.error('RPC exception:', rpcErr);
+            const { error } = await supabaseClient.rpc('signup_create_family', {
+                p_user_id: userId,
+                p_email: email,
+                p_family_name: familyName || 'My Family'
+            });
+
+            if (error) {
+                console.error("CREATE FAMILY ERROR:", error);
+                alert(error.message);
+                return;
             }
 
-            // Fallback: manually create
-            if (!familyId) {
-                console.log('STEP 2b: Manual fallback - creating family...');
-                const generatedCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-                const { data: newFamily, error: famError } = await supabaseClient
-                    .from('families')
-                    .insert({ 
-                        name: familyName || 'My Family',
-                        family_code: generatedCode,
-                        code: generatedCode
-                    })
-                    .select()
-                    .single();
-                if (famError) {
-                    console.error('Family insert FAILED:', famError);
-                    throw new Error('Cannot create family: ' + famError.message);
-                }
-                familyId = newFamily.id;
-                console.log('Family created:', familyId);
-
-                console.log('STEP 3: Creating profile...');
-                const { data: newProfile, error: profError } = await supabaseClient
-                    .from('profiles')
-                    .insert({
-                        id: userId,
-                        username: username,
-                        display_name: displayName,
-                        family_id: familyId,
-                        role: 'admin',
-                        points: 0,
-                        balance: 0,
-                        level: 1
-                    })
-                    .select()
-                    .single();
-                if (profError) {
-                    console.error('Profile insert FAILED:', profError);
-                    throw new Error('Cannot create profile: ' + profError.message);
-                }
-                console.log('Profile created:', newProfile);
-            }
-            
         } else {
-            // Join existing family by code
-            if (!familyCode) {
-                alert('Family code is required to join');
-                btn.textContent = 'Sign Up';
-                btn.disabled = false;
+            const { error } = await supabaseClient.rpc('signup_join_family', {
+                p_user_id: userId,
+                p_email: email,
+                p_family_code: familyCode.trim().toUpperCase()
+            });
+
+            if (error) {
+                console.error("JOIN FAMILY ERROR:", error);
+                alert(error.message);
                 return;
             }
-            
-            console.log('STEP 2: Looking up family by code:', familyCode);
-            let family = null;
-            
-            const { data: famByCode, error: codeErr } = await supabaseClient
-                .from('families')
-                .select('id, family_code, code')
-                .eq('family_code', familyCode.toUpperCase())
-                .maybeSingle();
-            console.log('Lookup by family_code:', { famByCode, codeErr });
-            if (!codeErr && famByCode) family = famByCode;
-            
-            if (!family) {
-                const { data: famByCode2, error: codeErr2 } = await supabaseClient
-                    .from('families')
-                    .select('id, family_code, code')
-                    .eq('code', familyCode.toUpperCase())
-                    .maybeSingle();
-                console.log('Lookup by code:', { famByCode2, codeErr2 });
-                if (!codeErr2 && famByCode2) family = famByCode2;
-            }
-            
-            if (!family) {
-                const { data: allFams, error: allErr } = await supabaseClient
-                    .from('families')
-                    .select('id, family_code, code');
-                console.log('All families:', { allFams, allErr });
-                if (!allErr && allFams) {
-                    family = allFams.find(f => {
-                        const idSuffix = f.id.replace(/-/g, '').slice(-8).toUpperCase();
-                        return idSuffix === familyCode.toUpperCase().replace(/-/g, '');
-                    });
-                }
-            }
-                
-            if (!family) {
-                alert('Invalid family code. Please check and try again.');
-                btn.textContent = 'Sign Up';
-                btn.disabled = false;
-                return;
-            }
-            
-            console.log('STEP 3: Creating profile for family:', family.id);
-            const { data: newProfile, error: profileError } = await supabaseClient
-                .from('profiles')
-                .insert({
-                    id: userId,
-                    username: username,
-                    display_name: displayName,
-                    family_id: family.id,
-                    role: 'user',
-                    points: 0,
-                    balance: 0,
-                    level: 1
-                })
-                .select()
-                .single();
-                
-            if (profileError) {
-                console.error('Profile insert FAILED:', profileError);
-                throw new Error('Cannot create profile: ' + profileError.message);
-            }
-            console.log('Profile created:', newProfile);
-            familyId = family.id;
         }
 
-        console.log('STEP 4: Signup complete! Signing out...');
-        await supabaseClient.auth.signOut();
-        alert('Account created! Please sign in with your credentials.');
-        showLoginScreen();
+        alert('Account created! Please log in.');
 
     } catch (err) {
-        console.error('Signup error:', err);
-        alert('Signup failed: ' + err.message);
+        alert(err.message);
     } finally {
         btn.textContent = 'Sign Up';
         btn.disabled = false;
     }
 }
 
+document.addEventListener('DOMContentLoaded', () => {
+    // Forms
+    const loginForm = document.getElementById('loginForm');
+    const signupForm = document.getElementById('signupForm');
+
+    // Tabs
+    const showLogin = document.getElementById('showLogin');
+    const showSignup = document.getElementById('showSignup');
+
+    // Toggle views
+    showLogin.addEventListener('click', () => {
+        loginForm.style.display = 'block';
+        signupForm.style.display = 'none';
+    });
+
+    showSignup.addEventListener('click', () => {
+        loginForm.style.display = 'none';
+        signupForm.style.display = 'block';
+    });
+
+    // Attach handlers
+    loginForm.addEventListener('submit', login);
+    signupForm.addEventListener('submit', signup);
+
+    // Signup mode toggle
+    document.getElementById('modeCreate').addEventListener('click', () => setSignupMode('create'));
+    document.getElementById('modeJoin').addEventListener('click', () => setSignupMode('join'));
+});
 async function bootstrapUser(userId) {
-    // Retry loading profile to handle race condition after signup
-    let profile = null;
-    let attempts = 0;
-    const maxAttempts = 10;
-    
-    while (!profile && attempts < maxAttempts) {
-        profile = await loadUserProfile(userId);
-        if (!profile) {
-            attempts++;
-            if (attempts < maxAttempts) {
-                await new Promise(r => setTimeout(r, 300));
-            }
-        }
-    }
-    
+
+    const profile = await loadUserProfile(userId);
+
     if (!profile) {
-        console.error('Profile not found after ' + maxAttempts + ' attempts');
+        console.error('Profile missing for user:', userId);
+
+        // DO NOT retry
+        // DO NOT loop
         await supabaseClient.auth.signOut();
         showLoginScreen();
-        alert('Account setup in progress. Please try signing in again in a moment.');
+
+        alert('Account setup failed. Please try signing up again.');
         return;
     }
 
     store.user = profile;
-    store.family = profile.families || null;
-    
-    // Ensure family code is available
-    if (store.family && profile.family_id) {
+    store.family = null;
+
+    // Load family once (if exists)
+    if (profile.family_id) {
         const { data: fam } = await supabaseClient
             .from('families')
             .select('*')
             .eq('id', profile.family_id)
             .maybeSingle();
+
         if (fam) {
-            fam.family_code = fam.family_code || fam.code || fam.id.replace(/-/g, '').slice(-8).toUpperCase();
             fam.code = fam.family_code;
             store.family = fam;
         }
     }
 
     const displayName = profile.display_name || profile.username;
+
     document.getElementById('userName').textContent = displayName;
-    document.getElementById('userAvatar').textContent = displayName.substring(0, 2).toUpperCase();
-    document.getElementById('userAvatar').style.background = getUserColorHex(profile.id);
+    document.getElementById('userAvatar').textContent =
+        displayName.substring(0, 2).toUpperCase();
+
+    document.getElementById('userAvatar').style.background =
+        getUserColorHex(profile.id);
+
     document.getElementById('userRole').textContent = profile.role;
 
     await loadFamilyData();
@@ -495,8 +424,6 @@ async function loadUserProfile(userId) {
     // Generate a shareable code if the families table doesn't have a code column
     if (data.families && data.families.id) {
         // Use last 6 chars of UUID as the family code (uppercase, no dashes)
-        const derivedCode = data.families.id.replace(/-/g, '').slice(-6).toUpperCase();
-        data.families.code = data.families.code || derivedCode;
     }
 
     return data;
@@ -2192,6 +2119,12 @@ function renderStore(container) {
     `;
 }
 
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('signupForm');
+    if (form) {
+        form.addEventListener('submit', signup);
+    }
+});
 function showAddStoreItemModal() {
     showModal('Add Store Item', `
         <div class="form-group">

@@ -8,30 +8,43 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Auth Screen -->
     <div id="authScreen" class="auth-screen">
-        <div class="auth-box">
-            <div class="logo" style="width:60px;height:60px;font-size:28px;margin:0 auto 16px;">H</div>
-            <h2>HomeHub</h2>
-            <p style="color:var(--text-muted);margin-bottom:24px;">Family Management Made Simple</p>
+    <div class="auth-box">
+        <div class="logo" style="width:60px;height:60px;font-size:28px;margin:0 auto 16px;">H</div>
+        <h2>HomeHub</h2>
+        <p style="color:var(--text-muted);margin-bottom:24px;">Family Management Made Simple</p>
 
-            <input id="email" class="form-input" placeholder="Email" style="margin-bottom:12px;" />
-            <input id="password" class="form-input" type="password" placeholder="Password" style="margin-bottom:12px;" />
-            
-            <!-- Toggle between Create and Join -->
-            <div style="display:flex;gap:8px;margin-bottom:12px;">
-                <button type="button" id="modeCreate" class="btn btn-primary" style="flex:1;justify-content:center;font-size:0.8rem;" onclick="setSignupMode('create')">Create Family</button>
-                <button type="button" id="modeJoin" class="btn btn-ghost" style="flex:1;justify-content:center;font-size:0.8rem;" onclick="setSignupMode('join')">Join Family</button>
-            </div>
-            
-            <input id="familyName" class="form-input" placeholder="Family Name" style="margin-bottom:16px;" />
-            <input id="familyCode" class="form-input" placeholder="Family Code" style="margin-bottom:16px;display:none;" />
-
-            <div class="auth-buttons">
-                <button class="btn btn-primary" style="flex:1;justify-content:center;" onclick="login()">Login</button>
-                <button class="btn btn-ghost" style="flex:1;justify-content:center;" onclick="signup()">Sign Up</button>
-            </div>
+        <!-- 🔘 Toggle Tabs -->
+        <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <button type="button" id="showLogin" class="btn btn-primary" style="flex:1;">Login</button>
+        <button type="button" id="showSignup" class="btn btn-ghost" style="flex:1;">Sign Up</button>
         </div>
+
+        <!-- 🔵 LOGIN FORM -->
+        <form id="loginForm">
+        <input id="loginEmail" class="form-input" placeholder="Email" style="margin-bottom:12px;" />
+        <input id="loginPassword" type="password" class="form-input" placeholder="Password" style="margin-bottom:16px;" />
+
+        <button type="submit" class="btn btn-primary" style="width:100%;">Login</button>
+        </form>
+
+        <!-- 🟢 SIGNUP FORM -->
+        <form id="signupForm" style="display:none;">
+        <input id="signupEmail" class="form-input" placeholder="Email" style="margin-bottom:12px;" />
+        <input id="signupPassword" type="password" class="form-input" placeholder="Password" style="margin-bottom:12px;" />
+
+        <!-- Mode Toggle -->
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+            <button type="button" id="modeCreate" class="btn btn-primary" style="flex:1;">Create</button>
+            <button type="button" id="modeJoin" class="btn btn-ghost" style="flex:1;">Join</button>
+        </div>
+
+        <input id="familyName" class="form-input" placeholder="Family Name" style="margin-bottom:12px;" />
+        <input id="familyCode" class="form-input" placeholder="Family Code" style="margin-bottom:16px;display:none;" />
+
+        <button type="submit" class="btn btn-primary" style="width:100%;">Sign Up</button>
+        </form>
+    </div>
     </div>
 
     <!-- Main App -->
