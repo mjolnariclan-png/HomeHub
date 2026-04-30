@@ -484,7 +484,31 @@ async function loadChores() {
         .order('created_at', { ascending: false });
     
     if (error) { console.error('Error loading chores:', error); store.loading.chores = false; return; }
-    store.chores = data || [];
+    const now = new Date();
+
+store.chores = (data || []).filter(chore => {
+    if (!chore.last_completed_at) return true;
+
+    const last = new Date(chore.last_completed_at);
+
+    switch (chore.recurrence) {
+        case 'daily':
+            return last.toDateString() !== now.toDateString();
+
+        case 'weekly':
+            const oneWeek = 7 * 24 * 60 * 60 * 1000;
+            return (now - last) >= oneWeek;
+
+        case 'monthly':
+            return (
+                last.getMonth() !== now.getMonth() ||
+                last.getFullYear() !== now.getFullYear()
+            );
+
+        default:
+            return true;
+    }
+});
     
     // Load pending completions
     const { data: completions, error: compError } = await supabaseClient
@@ -814,8 +838,16 @@ async function approveChore(completionId, choreId, userId, points, value) {
         return;
     }
     
+    // Step 3: Update last completed time on the chore
+    await supabaseClient
+        .from('chores')
+        .update({ last_completed_at: new Date().toISOString() })
+        .eq('id', choreId);
+
     alert('Chore approved! ' + finalPoints + ' pts and $' + finalValue.toFixed(2) + ' awarded.');
+
     await loadFamilyData();
+    await loadChores();
     renderPage('chores');
 }
 
