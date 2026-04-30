@@ -16,6 +16,7 @@ const store = {
     user: null,
     family: null,
     familyMembers: [],
+    allFamilyChores: [],
     chores: [],
     pendingCompletions: [],
     shoppingList: [],
@@ -498,6 +499,7 @@ async function login(e) {
 }
 
 async function linkOneSignalUser(userId) {
+  // Wait for OneSignal to be ready (auto-initialized by the script)
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   window.OneSignalDeferred.push(async function(OneSignal) {
     try {
@@ -764,7 +766,7 @@ async function loadFamilyData() {
 async function loadChores() {
     store.loading.chores = true;
     
-    // Load active chores
+    // Load ALL active chores for the family
     const { data, error } = await supabaseClient
         .from('chores')
         .select('*, profiles!chores_assigned_to_fkey(id, display_name, username)')
@@ -772,23 +774,30 @@ async function loadChores() {
         .is('is_active', true)
         .order('created_at', { ascending: false });
     
-    if (error) { console.error('Error loading chores:', error); store.loading.chores = false; return; }
-    // Keep ALL active chores — don't filter out completed ones
-// Sort: available first, then pending approval, then on cooldown
-store.chores = (data || []).sort((a, b) => {
-    const aPending = store.pendingCompletions?.some(pc => 
-        pc.chore_id === a.id && pc.completed_by === store.user?.id && pc.status === 'pending'
-    );
-    const bPending = store.pendingCompletions?.some(pc => 
-        pc.chore_id === b.id && pc.completed_by === store.user?.id && pc.status === 'pending'
-    );
-    const aAvailable = isChoreAvailable(a) && !aPending;
-    const bAvailable = isChoreAvailable(b) && !bPending;
+    if (error) { 
+        console.error('Error loading chores:', error); 
+        store.loading.chores = false; 
+        return; 
+    }
+    
+    // Store ALL family chores for admin overview
+    store.allFamilyChores = data || [];
+    
+    // For the main list, still sort with availability logic
+    store.chores = (data || []).sort((a, b) => {
+        const aPending = store.pendingCompletions?.some(pc => 
+            pc.chore_id === a.id && pc.completed_by === store.user?.id && pc.status === 'pending'
+        );
+        const bPending = store.pendingCompletions?.some(pc => 
+            pc.chore_id === b.id && pc.completed_by === store.user?.id && pc.status === 'pending'
+        );
+        const aAvailable = isChoreAvailable(a) && !aPending;
+        const bAvailable = isChoreAvailable(b) && !bPending;
 
-    if (aAvailable && !bAvailable) return -1;
-    if (!aAvailable && bAvailable) return 1;
-    return (a.title || '').localeCompare(b.title || '');
-});
+        if (aAvailable && !bAvailable) return -1;
+        if (!aAvailable && bAvailable) return 1;
+        return (a.title || '').localeCompare(b.title || '');
+    });
     
     // Load pending completions
     const { data: completions, error: compError } = await supabaseClient
@@ -1682,6 +1691,23 @@ function renderTodo(container) {
     container.innerHTML = html;
 }
 
+
+function groupByRoom(choreList) {
+    const grouped = {};
+    
+    // Initialize all rooms
+    ROOMS.forEach(room => grouped[room] = []);
+    grouped['Other'] = [];
+    grouped['Unassigned'] = [];
+    
+    choreList.forEach(chore => {
+        const room = chore.room || 'Unassigned';
+        if (grouped[room]) grouped[room].push(chore);
+        else grouped['Other'].push(chore);
+    });
+    
+    return grouped;
+}
 function showAddTodoModal() {
     const memberOptions = store.familyMembers.map(m => 
         `<option value="${m.id}">${m.display_name || m.username}</option>`
@@ -2022,15 +2048,28 @@ function renderChores(container) {
     const isAdmin = store.user?.role === 'admin' || store.user?.role === 'parent';
     const isChild = !isAdmin;
 
-    // Filter chores based on role
+    // Filter chores based on role — BUT keep all in store.chores for admin overview
     const myChores = store.chores.filter(c => {
-    const assignedId = c.assigned_to?.id || c.assigned_to;
-    return assignedId === store.user?.id;
-});
+        const assignedId = c.assigned_to?.id || c.assigned_to;
+        return assignedId === store.user?.id;
+    });
     const otherChores = store.chores.filter(c => {
-    const assignedId = c.assigned_to?.id || c.assigned_to;
-    return assignedId !== store.user?.id;
-});
+        const assignedId = c.assigned_to?.id || c.assigned_to;
+        return assignedId !== store.user?.id;
+    });
+
+    // DEBUG: Log what we have
+    console.log('=== CHORE DEBUG ===');
+    console.log('Total store.chores:', store.chores.length);
+    console.log('My chores:', myChores.length);
+    console.log('Other chores:', otherChores.length);
+    console.log('Family members:', store.familyMembers.map(m => ({id: m.id, name: m.display_name || m.username})));
+    console.log('Chore assigned_to samples:', store.chores.slice(0, 3).map(c => ({
+        title: c.title,
+        assigned_to: c.assigned_to,
+        assigned_to_id: c.assigned_to?.id || c.assigned_to
+    })));
+    console.log('===================');
 
     // Group by person helper
     const groupByPerson = (choreList) => {
@@ -2058,7 +2097,9 @@ function renderChores(container) {
     // Build person tabs HTML with nested room+recurrence grouping
     const buildPersonTabs = (choreMap, sectionId) => {
         const peopleWithChores = Object.keys(choreMap).filter(p => choreMap[p].length > 0);
-        if (peopleWithChores.length === 0) return '';
+        if (peopleWithChores.length === 0) {
+            return '<div class="empty-state-small">No chores found</div>';
+        }
         
         return `
             <div class="room-tabs" id="tabs-${sectionId}">
@@ -2088,7 +2129,7 @@ function renderChores(container) {
         // Group by recurrence first, then by room
         const grouped = {};
         
-        // Initialize structure: { daily: { Bathroom: [], Kitchen: [] }, weekly: {...} }
+        // Initialize structure
         const recurrences = ['daily', 'weekly', 'monthly', 'none'];
         recurrences.forEach(rec => {
             grouped[rec] = {};
@@ -2150,7 +2191,6 @@ function renderChores(container) {
                             const available = isChoreAvailable(chore);
                             const timerText = nextTime ? formatCountdown(nextTime) : 'Ready!';
                             
-                            // Determine visual state
                             const isOnCooldown = !available && !isPending && chore.recurrence && chore.recurrence !== 'none';
                             const isOneTimeDone = !available && !isPending && (!chore.recurrence || chore.recurrence === 'none');
                             
@@ -2194,45 +2234,6 @@ function renderChores(container) {
         });
         
         return html;
-    };
-
-    // Render a flat list of chores
-    const renderChoreList = (choreList) => {
-        if (choreList.length === 0) return '<div class="empty-state-small">No chores here</div>';
-        
-        return `
-            <div class="list-container">
-                ${choreList.map(chore => {
-                    const color = getUserColorHex(chore.assigned_to);
-                    const assignedName = getUserName(chore.assigned_to);
-                    const points = chore.points || 0;
-                    const value = chore.value || 0;
-                    const isPending = store.pendingCompletions?.some(pc => 
-                        pc.chore_id === chore.id && pc.completed_by === store.user?.id && pc.status === 'pending'
-                    );
-                    
-                    return `
-                        <div class="list-item">
-                            <div class="user-badge" style="background:${color};"></div>
-                            <div class="list-content">
-                                <div class="list-title">${chore.title}</div>
-                                <div class="list-meta">
-                                    <span>👤 ${assignedName}</span>
-                                    <span>🏷️ ${chore.category || 'General'}</span>
-                                    <span>⭐ ${points} pts</span>
-                                    <span>💰 $${value.toFixed(2)}</span>
-                                    ${chore.recurrence && chore.recurrence !== 'none' ? `<span>🔄 ${chore.recurrence}</span>` : ''}
-                                </div>
-                                ${chore.description ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">${chore.description}</div>` : ''}
-                            </div>
-                            ${!isPending ? `
-                                <button class="btn btn-primary btn-sm" onclick="completeChore('${chore.id}')">Complete</button>
-                            ` : '<span style="font-size:0.75rem;color:var(--warning);">⏳ Pending</span>'}
-                        </div>
-                    `;
-                }).join('')}
-            </div>
-        `;
     };
 
     // Start building the page
@@ -2282,71 +2283,140 @@ function renderChores(container) {
         `;
     }
 
-    // CHILD VIEW: Only their chores, grouped by room
+    // CHILD VIEW: Only their chores
     if (isChild) {
         if (myChores.length === 0) {
             html += emptyState('🧹', 'No Chores Assigned', 'You have no chores right now. Enjoy your free time!');
         } else {
-            const myChoresByRoom = groupByRoom(myChores);
             html += `
                 <div class="card" style="margin-bottom:16px;">
                     <div class="card-header">
                         <div class="card-title">🧹 My Chores</div>
                     </div>
-                    ${buildPersonTabs(myChoresByRoom, 'my-chores')}
+                    ${buildPersonTabs(groupByPerson(myChores), 'my-chores')}
                 </div>
             `;
         }
     }
 
-        // ADMIN VIEW: My Chores + Overview with toggle tabs
-        if (isAdmin) {
-            html += `
-                <div class="card" style="margin-bottom:16px;padding:0;">
-                    <div class="view-tabs">
-                        <button class="view-tab active" onclick="switchAdminView('my-chores')" id="view-tab-my-chores">
-                            🧹 My Chores
-                            ${myChores.length > 0 ? `<span class="view-count">${myChores.length}</span>` : ''}
-                        </button>
-                        <button class="view-tab" onclick="switchAdminView('overview')" id="view-tab-overview">
-                            👨‍👩‍👧‍👦 Family Overview
-                            ${store.chores.length > 0 ? `<span class="view-count">${store.chores.length}</span>` : ''}
-                        </button>
-                    </div>
+    // ADMIN VIEW: My Chores + Overview with toggle tabs
+    if (isAdmin) {
+        html += `
+            <div class="card" style="margin-bottom:16px;padding:0;">
+                <div class="view-tabs">
+                    <button class="view-tab active" onclick="switchAdminView('my-chores')" id="view-tab-my-chores">
+                        🧹 My Chores
+                        ${myChores.length > 0 ? `<span class="view-count">${myChores.length}</span>` : ''}
+                    </button>
+                    <button class="view-tab" onclick="switchAdminView('overview')" id="view-tab-overview">
+                        👨‍👩‍👧‍👦 Family Overview
+                        ${store.chores.length > 0 ? `<span class="view-count">${store.chores.length}</span>` : ''}
+                    </button>
                 </div>
-                
-                <div id="admin-view-my-chores" class="admin-view-panel active">
-                    ${myChores.length === 0 ? 
-                        emptyState('🧹', 'No Chores Assigned', 'You have no personal chores. Add some or check the Family Overview.') : 
-                        `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary);">
-                            <div class="card-header">
-                                <div class="card-title">🧹 My Chores</div>
-                            </div>
-                            ${buildPersonTabs(groupByPerson(myChores), 'admin-my')}
-                        </div>`
-                    }
-                </div>
-                
-                <div id="admin-view-overview" class="admin-view-panel">
-                    ${store.chores.length === 0 ? 
-                        emptyState('👨‍👩‍👧‍👦', 'No Family Chores', 'Add chores to see them here.') : 
-                        `<div class="card" style="margin-bottom:16px;">
-                            <div class="card-header">
-                                <div class="card-title">👨‍👩‍👧‍👦 Family Overview</div>
-                            </div>
-                            ${buildPersonTabs(groupByPerson(store.chores), 'admin-overview')}
-                        </div>`
-                    }
-                </div>
-            `;
-        }
+            </div>
+            
+            <div id="admin-view-my-chores" class="admin-view-panel active">
+                ${myChores.length === 0 ? 
+                    emptyState('🧹', 'No Chores Assigned', 'You have no personal chores. Add some or check the Family Overview.') : 
+                    `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary);">
+                        <div class="card-header">
+                            <div class="card-title">🧹 My Chores</div>
+                        </div>
+                        ${buildPersonTabs(groupByPerson(myChores), 'admin-my')}
+                    </div>`
+                }
+            </div>
+            
+            <div id="admin-view-overview" class="admin-view-panel">
+                ${store.chores.length === 0 ? 
+                    emptyState('👨‍👩‍👧‍👦', 'No Family Chores', 'Add chores to see them here.') : 
+                    `<div class="card" style="margin-bottom:16px;">
+                        <div class="card-header">
+                            <div class="card-title">👨‍👩‍👧‍👦 Family Overview (${store.chores.length} total)</div>
+                        </div>
+                        ${buildPersonTabs(groupByPerson(store.chores), 'admin-overview')}
+                    </div>`
+                }
+            </div>
+        `;
+    }
 
     html += `</div>`;
     container.innerHTML = html;
-    // Start live timer updates
     startChoreTimerUpdates();
 }
+function buildRoomTabs(roomMap, sectionId) {
+    const roomsWithChores = Object.keys(roomMap).filter(r => roomMap[r].length > 0);
+    if (roomsWithChores.length === 0) {
+        return '<div class="empty-state-small">No chores found</div>';
+    }
+    
+    return `
+        <div class="room-tabs" id="tabs-${sectionId}">
+            ${roomsWithChores.map((room, idx) => `
+                <button class="room-tab ${idx === 0 ? 'active' : ''}" 
+                        onclick="switchRoomTab('${sectionId}', '${room}')"
+                        data-room="${room}">
+                    ${room}
+                    <span class="room-count">${roomMap[room].length}</span>
+                </button>
+            `).join('')}
+        </div>
+        <div class="room-panels" id="panels-${sectionId}">
+            ${roomsWithChores.map((room, idx) => `
+                <div class="room-panel ${idx === 0 ? 'active' : ''}" data-room="${room}">
+                    ${renderRoomChoreDetail(roomMap[room])}
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
 
+function renderRoomChoreDetail(choreList) {
+    if (choreList.length === 0) return '<div class="empty-state-small">No chores here</div>';
+    
+    return `
+        <div class="list-container">
+            ${choreList.map(chore => {
+                const points = chore.points || 0;
+                const value = chore.value || 0;
+                const isPending = store.pendingCompletions?.some(pc => 
+                    pc.chore_id === chore.id && pc.completed_by === store.user?.id && pc.status === 'pending'
+                );
+                
+                const nextTime = getNextCompletionTime(chore.last_completed_at, chore.recurrence);
+                const available = isChoreAvailable(chore);
+                const timerText = nextTime ? formatCountdown(nextTime) : 'Ready!';
+                const isOnCooldown = !available && !isPending && chore.recurrence && chore.recurrence !== 'none';
+                
+                return `
+                    <div class="list-item ${isOnCooldown ? 'cooldown' : ''}" style="padding:12px 16px;">
+                        <div class="list-content">
+                            <div class="list-title">${chore.title}</div>
+                            <div class="list-meta">
+                                <span>🏷️ ${chore.category || 'General'}</span>
+                                <span>⭐ ${points} pts</span>
+                                <span>💰 $${value.toFixed(2)}</span>
+                                ${chore.recurrence && chore.recurrence !== 'none' ? `<span>🔄 ${chore.recurrence}</span>` : ''}
+                            </div>
+                            ${chore.description ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">${chore.description}</div>` : ''}
+                            ${isOnCooldown ? `<div style="font-size:0.75rem;color:var(--warning);margin-top:4px;">⏳ Available again in: <span class="chore-timer-inline" id="timer-${chore.id}">${timerText}</span></div>` : ''}
+                        </div>
+                        <div class="chore-actions">
+                            ${isPending ? `
+                                <span style="font-size:0.75rem;color:var(--warning);font-weight:600;">⏳ Pending Approval</span>
+                            ` : available ? `
+                                <button class="btn btn-primary btn-sm" onclick="completeChore('${chore.id}')">Complete</button>
+                            ` : `
+                                <button class="btn btn-primary btn-sm" disabled style="opacity:0.4;cursor:not-allowed;">Complete</button>
+                            `}
+                        </div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+}
 // ==================== ROOM TAB SWITCHING ====================
 function switchRoomTab(sectionId, roomName) {
     const tabsContainer = document.getElementById(`tabs-${sectionId}`);
