@@ -1,7 +1,7 @@
 {
   "name": "HomeHub",
   "short_name": "HomeHub",
-  "start_url": "/index.html",
+  "start_url": "mjolnariclan-png.github.io/HomeHub/",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#6366f1",
@@ -16,5 +16,21 @@
       "sizes": "512x512",
       "type": "image/png"
     }
+  ],
+  "dir": "auto",
+  "lang": "en",
+  "orientation": "any",
+  "categories": [
+    "education",
+    "entertainment",
+    "finance",
+    "food",
+    "health",
+    "kids",
+    "lifestyle",
+    "navigation",
+    "photo",
+    "shopping",
+    "utilities"
   ]
 }
