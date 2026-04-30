@@ -36,21 +36,45 @@ const store = {
 };
 async function sendPushToUsers(title, message, targetUserIds, deepLink = null) {
   try {
-    // Use player IDs instead of tags for more reliable targeting
-    // Or keep tags if your Edge Function supports them
-    await fetch(`${SUPABASE_URL}/functions/v1/push-notification`, {
+    // Skip if no targets
+    if (!targetUserIds || targetUserIds.length === 0) {
+      console.log('No target users for push, skipping');
+      return;
+    }
+
+    const filters = targetUserIds.flatMap((id, index) => {
+      const filter = { field: "tag", key: "user_id", relation: "=", value: id };
+      if (index < targetUserIds.length - 1) {
+        return [filter, { operator: "OR" }];
+      }
+      return [filter];
+    });
+
+    const body = {
+      title,
+      message,
+      filters,
+      url: deepLink
+    };
+
+    console.log('Sending push payload:', JSON.stringify(body, null, 2));
+
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/push-notification`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${SUPABASE_KEY}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        title,
-        message,
-        targetUserIds,  // Pass raw IDs, let Edge Function handle lookup
-        url: deepLink
-      })
+      body: JSON.stringify(body)
     });
+
+    const data = await res.json();
+    console.log('Push response:', res.status, data);
+
+    if (!res.ok) {
+      console.error('Push failed:', data);
+    }
+
   } catch (e) {
     console.error('Push failed:', e);
   }
