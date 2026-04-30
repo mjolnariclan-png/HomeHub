@@ -168,6 +168,7 @@ async function initApp() {
     }
 
     supabaseClient.auth.onAuthStateChange(async (event, session) => {
+        console.log('Auth state change:', event, session?.user?.id);
         if (event === 'SIGNED_IN' && session) {
             await bootstrapUser(session.user.id);
         }
@@ -237,22 +238,82 @@ async function signup() {
     btn.disabled = true;
 
     try {
+        console.log('STEP 1: Creating auth user...');
         const { data: authData, error: authError } = await supabaseClient.auth.signUp({ email, password });
-        if (authError) throw authError;
+        if (authError) {
+            console.error('Auth signup failed:', authError);
+            throw authError;
+        }
+        console.log('Auth user created:', authData.user.id);
 
         const userId = authData.user.id;
         const username = email.split('@')[0];
         const displayName = email.split('@')[0];
+        let familyId = null;
 
         if (signupMode === 'create') {
-            // Create new family via RPC
-            const { data: familyId, error: rpcError } = await supabaseClient.rpc('create_family_and_admin', {
-                p_user_id: userId,
-                p_family_name: familyName || 'My Family',
-                p_username: username,
-                p_display_name: displayName
-            });
-            if (rpcError) throw rpcError;
+            console.log('STEP 2: Creating family...');
+            
+            // Try RPC first
+            try {
+                console.log('Trying RPC create_family_and_admin...');
+                const { data: rpcFamilyId, error: rpcError } = await supabaseClient.rpc('create_family_and_admin', {
+                    p_user_id: userId,
+                    p_family_name: familyName || 'My Family',
+                    p_username: username,
+                    p_display_name: displayName
+                });
+                if (rpcError) {
+                    console.error('RPC error:', rpcError);
+                } else {
+                    familyId = rpcFamilyId;
+                    console.log('RPC succeeded, familyId:', familyId);
+                }
+            } catch (rpcErr) {
+                console.error('RPC exception:', rpcErr);
+            }
+
+            // Fallback: manually create
+            if (!familyId) {
+                console.log('STEP 2b: Manual fallback - creating family...');
+                const generatedCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+                const { data: newFamily, error: famError } = await supabaseClient
+                    .from('families')
+                    .insert({ 
+                        name: familyName || 'My Family',
+                        family_code: generatedCode,
+                        code: generatedCode
+                    })
+                    .select()
+                    .single();
+                if (famError) {
+                    console.error('Family insert FAILED:', famError);
+                    throw new Error('Cannot create family: ' + famError.message);
+                }
+                familyId = newFamily.id;
+                console.log('Family created:', familyId);
+
+                console.log('STEP 3: Creating profile...');
+                const { data: newProfile, error: profError } = await supabaseClient
+                    .from('profiles')
+                    .insert({
+                        id: userId,
+                        username: username,
+                        display_name: displayName,
+                        family_id: familyId,
+                        role: 'admin',
+                        points: 0,
+                        balance: 0,
+                        level: 1
+                    })
+                    .select()
+                    .single();
+                if (profError) {
+                    console.error('Profile insert FAILED:', profError);
+                    throw new Error('Cannot create profile: ' + profError.message);
+                }
+                console.log('Profile created:', newProfile);
+            }
             
         } else {
             // Join existing family by code
@@ -263,23 +324,49 @@ async function signup() {
                 return;
             }
             
-            // Look up family by code
-            const { data: family, error: famError } = await supabaseClient
+            console.log('STEP 2: Looking up family by code:', familyCode);
+            let family = null;
+            
+            const { data: famByCode, error: codeErr } = await supabaseClient
                 .from('families')
-                .select('id')
-                .eq('code', familyCode.toUpperCase())
+                .select('id, family_code, code')
+                .eq('family_code', familyCode.toUpperCase())
                 .maybeSingle();
+            console.log('Lookup by family_code:', { famByCode, codeErr });
+            if (!codeErr && famByCode) family = famByCode;
+            
+            if (!family) {
+                const { data: famByCode2, error: codeErr2 } = await supabaseClient
+                    .from('families')
+                    .select('id, family_code, code')
+                    .eq('code', familyCode.toUpperCase())
+                    .maybeSingle();
+                console.log('Lookup by code:', { famByCode2, codeErr2 });
+                if (!codeErr2 && famByCode2) family = famByCode2;
+            }
+            
+            if (!family) {
+                const { data: allFams, error: allErr } = await supabaseClient
+                    .from('families')
+                    .select('id, family_code, code');
+                console.log('All families:', { allFams, allErr });
+                if (!allErr && allFams) {
+                    family = allFams.find(f => {
+                        const idSuffix = f.id.replace(/-/g, '').slice(-8).toUpperCase();
+                        return idSuffix === familyCode.toUpperCase().replace(/-/g, '');
+                    });
+                }
+            }
                 
-            if (famError || !family) {
-                // Clean up: delete the auth user since family join failed
+            if (!family) {
                 alert('Invalid family code. Please check and try again.');
                 btn.textContent = 'Sign Up';
                 btn.disabled = false;
                 return;
             }
             
-            // Create profile linked to existing family
-            const { error: profileError } = await supabaseClient
+            console.log('STEP 3: Creating profile for family:', family.id);
+            const { data: newProfile, error: profileError } = await supabaseClient
                 .from('profiles')
                 .insert({
                     id: userId,
@@ -290,11 +377,20 @@ async function signup() {
                     points: 0,
                     balance: 0,
                     level: 1
-                });
+                })
+                .select()
+                .single();
                 
-            if (profileError) throw profileError;
+            if (profileError) {
+                console.error('Profile insert FAILED:', profileError);
+                throw new Error('Cannot create profile: ' + profileError.message);
+            }
+            console.log('Profile created:', newProfile);
+            familyId = family.id;
         }
 
+        console.log('STEP 4: Signup complete! Signing out...');
+        await supabaseClient.auth.signOut();
         alert('Account created! Please sign in with your credentials.');
         showLoginScreen();
 
@@ -335,13 +431,17 @@ async function bootstrapUser(userId) {
     store.family = profile.families || null;
     
     // Ensure family code is available
-    if (store.family && !store.family.code && profile.family_id) {
+    if (store.family && profile.family_id) {
         const { data: fam } = await supabaseClient
             .from('families')
-            .select('id, name, code, created_at')
+            .select('*')
             .eq('id', profile.family_id)
             .maybeSingle();
-        if (fam) store.family = fam;
+        if (fam) {
+            fam.family_code = fam.family_code || fam.code || fam.id.replace(/-/g, '').slice(-8).toUpperCase();
+            fam.code = fam.family_code;
+            store.family = fam;
+        }
     }
 
     const displayName = profile.display_name || profile.username;
@@ -363,8 +463,13 @@ async function loadUserProfile(userId) {
         .eq('id', userId)
         .maybeSingle();
 
-    if (error || !data) {
+    if (error) {
         console.error('Profile load error:', error);
+        return null;
+    }
+    
+    if (!data) {
+        console.log('Profile not found for user:', userId);
         return null;
     }
 
@@ -375,16 +480,23 @@ async function loadUserProfile(userId) {
         }
     }
 
-    // Fallback: if no family data or missing code, fetch directly
-    if (data.family_id && (!data.families || !data.families.code)) {
+    // Fallback: fetch family directly if join didn't work
+    if (data.family_id && !data.families) {
         const { data: fam, error: famError } = await supabaseClient
             .from('families')
-            .select('id, name, code, created_at')
+            .select('*')
             .eq('id', data.family_id)
             .maybeSingle();
         if (!famError && fam) {
             data.families = fam;
         }
+    }
+
+    // Generate a shareable code if the families table doesn't have a code column
+    if (data.families && data.families.id) {
+        // Use last 6 chars of UUID as the family code (uppercase, no dashes)
+        const derivedCode = data.families.id.replace(/-/g, '').slice(-6).toUpperCase();
+        data.families.code = data.families.code || derivedCode;
     }
 
     return data;
@@ -2157,7 +2269,7 @@ function renderAdmin(container) {
                     <div class="form-group">
                         <label class="form-label">Family Code</label>
                         <div style="display:flex;gap:8px;">
-                            <input type="text" class="form-input" value="${store.family?.code || ''}" disabled style="opacity:0.5;flex:1;">
+                            <input type="text" class="form-input" value="${store.family?.family_code || store.family?.code || (store.family?.id ? store.family.id.replace(/-/g, '').slice(-8).toUpperCase() : 'N/A')}" disabled style="opacity:0.5;flex:1;">
                             <button class="btn btn-ghost" onclick="copyFamilyCode()">📋</button>
                         </div>
                     </div>
@@ -2237,8 +2349,9 @@ async function updateFamily() {
 }
 
 function copyFamilyCode() {
-    const code = store.family?.code || '';
-    navigator.clipboard.writeText(code).then(() => alert('Family code copied!'));
+    const code = store.family?.family_code || store.family?.code || (store.family?.id ? store.family.id.replace(/-/g, '').slice(-8).toUpperCase() : '');
+    if (!code) { alert('No family code available'); return; }
+    navigator.clipboard.writeText(code).then(() => alert('Family code copied: ' + code));
 }
 
 async function changeUserRole(userId, newRole) {
