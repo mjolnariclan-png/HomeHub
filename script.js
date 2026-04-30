@@ -33,7 +33,25 @@ const store = {
     channels: {},
     currentPage: 'login'
 };
-
+async function sendPushToUsers(title, message, targetUserIds, deepLink = null) {
+  try {
+    await fetch(`${SUPABASE_URL}/functions/v1/push-notification`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        title,
+        message,
+        userIds: targetUserIds, // Array of Supabase user UUIDs
+        url: deepLink
+      })
+    })
+  } catch (e) {
+    console.error('Push failed:', e)
+  }
+}
 
 // ==================== ROOM CONFIGURATION ====================
 const ROOMS = [
@@ -148,6 +166,217 @@ function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('open');
 }
 
+
+
+// ==================== NOTIFICATION STORE ====================
+store.notifications = []
+
+// ==================== NOTIFICATION SETUP ====================
+function setupNotificationSubscriptions() {
+  const tables = [
+    { table: 'chore_completions', type: 'chore', icon: '🧹', title: 'Chore Completed' },
+    { table: 'messages', type: 'message', icon: '💬', title: 'New Message' },
+    { table: 'transactions', type: 'store', icon: '🛍️', title: 'Store Purchase' },
+    { table: 'calendar_events', type: 'calendar', icon: '📅', title: 'Calendar Update' },
+    { table: 'budget_entries', type: 'budget', icon: '💰', title: 'Budget Update' }
+  ]
+
+  tables.forEach(({ table, type, icon, title }) => {
+    supabaseClient
+      .channel(`${table}-notify`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: table,
+        filter: `family_id=eq.${store.user.family_id}`
+      }, (payload) => {
+        // Skip notifications for your own actions
+        const createdBy = payload.new.created_by || payload.new.sender_id || payload.new.completed_by
+        if (createdBy === store.user.id) return
+
+        let body = ''
+        let deepLink = ''
+
+        switch (type) {
+          case 'chore':
+            body = 'Someone completed a chore and needs approval'
+            deepLink = 'chores'
+            break
+          case 'message':
+            body = payload.new.message?.substring(0, 60) || 'New message'
+            if (payload.new.message?.length > 60) body += '...'
+            deepLink = 'messages'
+            break
+          case 'store':
+            body = `A store purchase was made`
+            deepLink = 'store'
+            break
+          case 'calendar':
+            body = `New event: ${payload.new.title || 'Calendar update'}`
+            deepLink = 'calendar'
+            break
+          case 'budget':
+            body = `Budget entry: ${payload.new.title || 'Update'}`
+            deepLink = 'budget'
+            break
+        }
+
+        addNotification({
+          id: payload.new.id,
+          type,
+          icon,
+          title,
+          body,
+          deepLink,
+          created_at: new Date().toISOString(),
+          read: false
+        })
+      })
+      .subscribe()
+  })
+}
+
+function addNotification(notification) {
+  // Prevent duplicates
+  if (store.notifications.some(n => n.id === notification.id && n.type === notification.type)) return
+
+  store.notifications.unshift(notification)
+  updateNotificationBadge()
+  renderNotificationList()
+
+  // Show toast
+  showToast(notification)
+
+  // Play sound (optional - browser may block until user interaction)
+  // const audio = new Audio('/notification.mp3')
+  // audio.play().catch(() => {})
+}
+
+function updateNotificationBadge() {
+  const unread = store.notifications.filter(n => !n.read).length
+  const badge = document.getElementById('notificationBadge')
+  if (!badge) return
+
+  if (unread > 0) {
+    badge.textContent = unread > 99 ? '99+' : unread
+    badge.classList.remove('hidden')
+  } else {
+    badge.classList.add('hidden')
+  }
+}
+
+function renderNotificationList() {
+  const list = document.getElementById('notificationList')
+  if (!list) return
+
+  if (store.notifications.length === 0) {
+    list.innerHTML = '<div class="notification-empty">No notifications</div>'
+    return
+  }
+
+  list.innerHTML = store.notifications.map(n => `
+    <div class="notification-item ${n.read ? '' : 'unread'}" 
+         onclick="handleNotificationClick('${n.id}', '${n.type}', '${n.deepLink}')">
+      <div class="notification-icon ${n.type}">${n.icon}</div>
+      <div class="notification-content">
+        <div class="notification-text">
+          <strong>${n.title}</strong><br>
+          ${n.body}
+        </div>
+        <div class="notification-time">${timeAgo(n.created_at)}</div>
+      </div>
+    </div>
+  `).join('')
+}
+
+function toggleNotificationPanel() {
+  const panel = document.getElementById('notificationPanel')
+  if (!panel) return
+  panel.classList.toggle('hidden')
+}
+
+function markAllRead() {
+  store.notifications.forEach(n => n.read = true)
+  updateNotificationBadge()
+  renderNotificationList()
+}
+
+function handleNotificationClick(id, type, deepLink) {
+  // Mark as read
+  const notif = store.notifications.find(n => n.id === id && n.type === type)
+  if (notif) {
+    notif.read = true
+    updateNotificationBadge()
+    renderNotificationList()
+  }
+
+  // Close panel
+  document.getElementById('notificationPanel')?.classList.add('hidden')
+
+  // Navigate
+  if (deepLink) {
+    navigateTo(deepLink)
+  }
+}
+
+// Close notification panel when clicking outside
+document.addEventListener('click', (e) => {
+  const wrapper = document.querySelector('.notification-wrapper')
+  const panel = document.getElementById('notificationPanel')
+  if (wrapper && panel && !wrapper.contains(e.target)) {
+    panel.classList.add('hidden')
+  }
+})
+
+// ==================== TOAST NOTIFICATIONS ====================
+function showToast(notification) {
+  let container = document.querySelector('.toast-container')
+  if (!container) {
+    container = document.createElement('div')
+    container.className = 'toast-container'
+    document.body.appendChild(container)
+  }
+
+  const toast = document.createElement('div')
+  toast.className = 'toast'
+  toast.innerHTML = `
+    <div class="toast-icon">${notification.icon}</div>
+    <div class="toast-content">
+      <div class="toast-title">${notification.title}</div>
+      <div class="toast-body">${notification.body}</div>
+    </div>
+  `
+
+  toast.addEventListener('click', () => {
+    handleNotificationClick(notification.id, notification.type, notification.deepLink)
+    toast.remove()
+  })
+
+  container.appendChild(toast)
+
+  // Auto remove after 5 seconds
+  setTimeout(() => {
+    toast.classList.add('hiding')
+    setTimeout(() => toast.remove(), 300)
+  }, 5000)
+}
+
+// ==================== TIME AGO HELPER ====================
+function timeAgo(dateString) {
+  const date = new Date(dateString)
+  const now = new Date()
+  const seconds = Math.floor((now - date) / 1000)
+
+  if (seconds < 60) return 'Just now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d ago`
+  return date.toLocaleDateString()
+}
+
 function renderPage(page) {
     const container = document.getElementById('contentArea');
     container.innerHTML = '';
@@ -255,6 +484,13 @@ async function login(e) {
         btn.textContent = 'Login';
         btn.disabled = false;
     }
+}
+
+async function linkOneSignalUser(userId) {
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
+  window.OneSignalDeferred.push(async function(OneSignal) {
+    await OneSignal.login(userId); // Links push subscription to this user
+  });
 }
 
 function setSignupMode(mode) {
@@ -384,6 +620,7 @@ async function bootstrapUser(userId) {
     }
 
     store.user = profile;
+    await linkOneSignalUser(userId);
     store.family = null;
 
     // Load family once (if exists)
@@ -411,10 +648,11 @@ async function bootstrapUser(userId) {
 
     document.getElementById('userRole').textContent = profile.role;
 
-    await loadFamilyData();
-    setupRealtimeSubscriptions();
-    showApp();
-    navigateTo('dashboard');
+    await loadFamilyData()
+    setupRealtimeSubscriptions()
+    setupNotificationSubscriptions()
+    showApp()
+    navigateTo('dashboard')
 }
 
 async function loadUserProfile(userId) {
@@ -512,34 +750,25 @@ async function loadChores() {
         .from('chores')
         .select('*, profiles!chores_assigned_to_fkey(id, display_name, username)')
         .eq('family_id', store.user.family_id)
-        .eq('is_active', true)
+        .is('is_active', true)
         .order('created_at', { ascending: false });
     
     if (error) { console.error('Error loading chores:', error); store.loading.chores = false; return; }
-    const now = new Date();
+    // Keep ALL active chores — don't filter out completed ones
+// Sort: available first, then pending approval, then on cooldown
+store.chores = (data || []).sort((a, b) => {
+    const aPending = store.pendingCompletions?.some(pc => 
+        pc.chore_id === a.id && pc.completed_by === store.user?.id && pc.status === 'pending'
+    );
+    const bPending = store.pendingCompletions?.some(pc => 
+        pc.chore_id === b.id && pc.completed_by === store.user?.id && pc.status === 'pending'
+    );
+    const aAvailable = isChoreAvailable(a) && !aPending;
+    const bAvailable = isChoreAvailable(b) && !bPending;
 
-store.chores = (data || []).filter(chore => {
-    if (!chore.last_completed_at) return true;
-
-    const last = new Date(chore.last_completed_at);
-
-    switch (chore.recurrence) {
-        case 'daily':
-            return last.toDateString() !== now.toDateString();
-
-        case 'weekly':
-            const oneWeek = 7 * 24 * 60 * 60 * 1000;
-            return (now - last) >= oneWeek;
-
-        case 'monthly':
-            return (
-                last.getMonth() !== now.getMonth() ||
-                last.getFullYear() !== now.getFullYear()
-            );
-
-        default:
-            return true;
-    }
+    if (aAvailable && !bAvailable) return -1;
+    if (!aAvailable && bAvailable) return 1;
+    return (a.title || '').localeCompare(b.title || '');
 });
     
     // Load pending completions
@@ -575,6 +804,7 @@ async function loadShoppingList() {
 }
 
 async function loadTodos() {
+    store.loading.todos = true;
     const { data, error } = await supabaseClient
         .from('todos')
         .select(`*, assigned_to:profiles!todos_assigned_to_fkey(id, display_name, username)`)
@@ -583,8 +813,9 @@ async function loadTodos() {
         .order('priority', { ascending: false })
         .order('created_at', { ascending: false });
     
-    if (error) { console.error('Error loading todos:', error); return; }
+    if (error) { console.error('Error loading todos:', error); store.loading.todos = false; return; }
     store.todos = data || [];
+    store.loading.todos = false;
 }
 
 async function loadRecipes() {
@@ -676,13 +907,22 @@ async function loadStoreItems() {
     store.storeItems = data || [];
 }
 
-// ==================== REAL-TIME ====================
 function setupRealtimeSubscriptions() {
     const familyId = store.user.family_id;
     const tables = [
         'chores', 'shopping_list', 'todos', 'recipes',
         'calendar_events', 'messages', 'budget_entries', 'shop_items'
     ];
+    
+    // Unsubscribe and remove any existing channels first
+    Object.values(store.channels).forEach(ch => {
+        try {
+            ch.unsubscribe();
+        } catch (e) {
+            // Channel may already be closed
+        }
+    });
+    store.channels = {};
     
     tables.forEach(table => {
         const channel = supabaseClient
@@ -712,12 +952,12 @@ function handleRealtimeUpdate(table) {
     }
 }
 
-// ==================== MUTATIONS ====================
-async function addTodo(title, description, priority, assignedTo) {
+async function addTodo(title, description, priority, assignedTo, room) {
     const { error } = await supabaseClient.from('todos').insert({
         family_id: store.user.family_id,
         title, description, priority,
         assigned_to: assignedTo || null,
+        room: room || null,
         created_by: store.user.id
     }).select();
     if (error) { alert('Error: ' + error.message); return false; }
@@ -807,23 +1047,116 @@ async function addChore(title, description, value, points, category, room, recur
     return true;
 }
 
+// When chore is completed → notify parents
 async function completeChore(choreId) {
-    console.log('completeChore:', { choreId, userId: store.user?.id });
-    
-    const { data, error } = await supabaseClient.from('chore_completions').insert({
-        chore_id: choreId,
-        completed_by: store.user.id,
-        status: 'pending'
-    }).select();
-    
-    console.log('completeChore result:', { data, error });
-    
-    if (error) { alert('Error: ' + error.message); return; }
-    alert('Chore submitted for approval!');
-    await loadChores();
-    renderPage('chores');
+  const { data, error } = await supabaseClient.from('chore_completions').insert({
+    chore_id: choreId,
+    completed_by: store.user.id,
+    status: 'pending'
+  }).select()
+  
+  if (error) { alert('Error: ' + error.message); return }
+  
+  // Notify parents/admins
+  const parents = store.familyMembers
+    .filter(m => (m.role === 'admin' || m.role === 'parent') && m.id !== store.user.id)
+    .map(m => m.id)
+  
+  if (parents.length > 0) {
+    await sendPushToUsers(
+      '🧹 Chore Completed!',
+      `${store.user.display_name} completed a chore and needs approval.`,
+      parents,
+      `${window.location.origin}?page=chores`
+    )
+  }
+  
+  alert('Chore submitted for approval!')
+  await loadChores()
+  renderPage('chores')
 }
 
+// When message is sent → notify everyone else in family
+async function sendMessage(text) {
+  const { error } = await supabaseClient.from('messages').insert({
+    family_id: store.user.family_id,
+    sender_id: store.user.id,
+    message: text
+  }).select()
+  
+  if (error) { alert('Error: ' + error.message); return }
+  
+  // Notify other family members
+  const others = store.familyMembers
+    .filter(m => m.id !== store.user.id)
+    .map(m => m.id)
+  
+  if (others.length > 0) {
+    await sendPushToUsers(
+      '💬 New Message',
+      `${store.user.display_name}: ${text.substring(0, 60)}${text.length > 60 ? '...' : ''}`,
+      others,
+      `${window.location.origin}?page=messages`
+    )
+  }
+  
+  document.getElementById('messageInput').value = ''
+  await loadMessages()
+  renderPage('messages')
+}
+
+// When store item is purchased → notify parents
+async function purchaseStoreItem(itemId, price) {
+  if (store.user.balance < price) {
+    alert('Not enough balance!')
+    return
+  }
+  
+  const { error } = await supabaseClient.rpc('purchase_shop_item', {
+    p_user_id: store.user.id,
+    p_item_id: itemId
+  }).select()
+  
+  if (error) { alert('Error: ' + error.message); return }
+  
+  // Find item name
+  const item = store.storeItems.find(i => i.id === itemId)
+  
+  // Notify parents
+  const parents = store.familyMembers
+    .filter(m => (m.role === 'admin' || m.role === 'parent') && m.id !== store.user.id)
+    .map(m => m.id)
+  
+  if (parents.length > 0 && item) {
+    await sendPushToUsers(
+      '🛍️ Store Purchase',
+      `${store.user.display_name} bought ${item.name} for $${price.toFixed(2)}`,
+      parents,
+      `${window.location.origin}?page=store`
+    )
+  }
+  
+  alert('Purchased!')
+  await loadFamilyData()
+  renderPage('store')
+}
+
+// Calendar event added → notify assigned person
+async function addCalendarEvent(title, description, startTime, endTime, eventType, location, assignedTo, recurrence) {
+  // ... existing insert code ...
+  
+  // If assigned to someone specific, notify them
+  if (assignedTo && assignedTo !== store.user.id) {
+    await sendPushToUsers(
+      '📅 New Calendar Event',
+      `${store.user.display_name} added "${title}" for you`,
+      [assignedTo],
+      `${window.location.origin}?page=calendar`
+    )
+  }
+  
+  // ... rest of existing code ...
+}
 async function approveChore(completionId, choreId, userId, points, value) {
     const isAdmin = store.user?.role === 'admin' || store.user?.role === 'adult';
     if (!isAdmin) { alert('Only parents/admins can approve chores.'); return; }
@@ -947,15 +1280,31 @@ async function addCalendarEvent(title, description, startTime, endTime, eventTyp
 }
 
 async function sendMessage(text) {
-    const { error } = await supabaseClient.from('messages').insert({
-        family_id: store.user.family_id,
-        sender_id: store.user.id,
-        message: text
-    }).select();
-    if (error) { alert('Error: ' + error.message); return; }
-    document.getElementById('messageInput').value = '';
-    await loadMessages();
-    renderPage('messages');
+  const { error } = await supabaseClient.from('messages').insert({
+    family_id: store.user.family_id,
+    sender_id: store.user.id,
+    message: text
+  }).select()
+  
+  if (error) { alert('Error: ' + error.message); return }
+  
+  // Notify other family members
+  const others = store.familyMembers
+    .filter(m => m.id !== store.user.id)
+    .map(m => m.id)
+  
+  if (others.length > 0) {
+    await sendPushToUsers(
+      '💬 New Message',
+      `${store.user.display_name}: ${text.substring(0, 60)}${text.length > 60 ? '...' : ''}`,
+      others,
+      `${window.location.origin}?page=messages`
+    )
+  }
+  
+  document.getElementById('messageInput').value = ''
+  await loadMessages()
+  renderPage('messages')
 }
 
 async function addBudgetEntry(title, amount, entryType, category, dueDate, isRecurring, recurrenceType) {
@@ -989,18 +1338,38 @@ async function addStoreItem(name, description, price) {
 }
 
 async function purchaseStoreItem(itemId, price) {
-    if (store.user.balance < price) {
-        alert('Not enough balance!');
-        return;
-    }
-    const { error } = await supabaseClient.rpc('purchase_shop_item', {
-        p_user_id: store.user.id,
-        p_item_id: itemId
-    }).select();
-    if (error) { alert('Error: ' + error.message); return; }
-    alert('Purchased!');
-    await loadFamilyData();
-    renderPage('store');
+  if (store.user.balance < price) {
+    alert('Not enough balance!')
+    return
+  }
+  
+  const { error } = await supabaseClient.rpc('purchase_shop_item', {
+    p_user_id: store.user.id,
+    p_item_id: itemId
+  }).select()
+  
+  if (error) { alert('Error: ' + error.message); return }
+  
+  // Find item name
+  const item = store.storeItems.find(i => i.id === itemId)
+  
+  // Notify parents
+  const parents = store.familyMembers
+    .filter(m => (m.role === 'admin' || m.role === 'parent') && m.id !== store.user.id)
+    .map(m => m.id)
+  
+  if (parents.length > 0 && item) {
+    await sendPushToUsers(
+      '🛍️ Store Purchase',
+      `${store.user.display_name} bought ${item.name} for $${price.toFixed(2)}`,
+      parents,
+      `${window.location.origin}?page=store`
+    )
+  }
+  
+  alert('Purchased!')
+  await loadFamilyData()
+  renderPage('store')
 }
 
 // ==================== RENDER: DASHBOARD ====================
@@ -1079,59 +1448,219 @@ function renderTodo(container) {
         return;
     }
 
-    const myTodos = store.todos.filter(t => t.assigned_to === store.user.id || !t.assigned_to);
-    const familyTodos = store.todos.filter(t => t.assigned_to && t.assigned_to !== store.user.id);
+    const isAdmin = store.user?.role === 'admin' || store.user?.role === 'parent';
+    const activeTodos = store.todos.filter(t => !t.completed);
 
-    container.innerHTML = `
-        <div class="fade-in">
-            <div style="display:flex;gap:8px;margin-bottom:20px;">
-                <button class="btn btn-primary" onclick="showAddTodoModal()">+ Add To-Do</button>
+    // Group todos by assigned person
+    const groupByPerson = (todoList) => {
+        const grouped = {};
+        store.familyMembers.forEach(member => {
+            const name = member.display_name || member.username || 'Unknown';
+            grouped[name] = [];
+        });
+        grouped['Unassigned'] = [];
+        
+        todoList.forEach(todo => {
+            const assignedId = todo.assigned_to?.id || todo.assigned_to;
+            const member = store.familyMembers.find(m => m.id === assignedId);
+            const name = member ? (member.display_name || member.username) : 'Unassigned';
+            if (grouped[name]) grouped[name].push(todo);
+            else grouped['Unassigned'].push(todo);
+        });
+        return grouped;
+    };
+
+    // Build person tabs
+    const buildPersonTabs = (todoMap, sectionId) => {
+        const peopleWithTodos = Object.keys(todoMap).filter(p => todoMap[p].length > 0);
+        if (peopleWithTodos.length === 0) {
+            return '<div class="empty-state-small">No to-dos found</div>';
+        }
+        
+        return `
+            <div class="room-tabs" id="tabs-${sectionId}">
+                ${peopleWithTodos.map((person, idx) => `
+                    <button class="room-tab ${idx === 0 ? 'active' : ''}" 
+                            onclick="switchPersonTab('${sectionId}', '${person}')"
+                            data-person="${person}">
+                        ${person}
+                        <span class="room-count">${todoMap[person].length}</span>
+                    </button>
+                `).join('')}
+            </div>
+            <div class="room-panels" id="panels-${sectionId}">
+                ${peopleWithTodos.map((person, idx) => `
+                    <div class="room-panel ${idx === 0 ? 'active' : ''}" data-person="${person}">
+                        ${renderPersonTodoDetail(todoMap[person])}
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    };
+
+    // Render todos for a single person, grouped by room then priority
+    const renderPersonTodoDetail = (todoList) => {
+        if (todoList.length === 0) {
+            return '<div class="empty-state-small">No to-dos</div>';
+        }
+        
+        // Group by room
+        const byRoom = {};
+        ROOMS.forEach(r => byRoom[r] = []);
+        byRoom['Other'] = [];
+        byRoom['Unassigned'] = [];
+        
+        todoList.forEach(todo => {
+            const room = todo.room || 'Unassigned';
+            if (byRoom[room]) byRoom[room].push(todo);
+            else byRoom['Other'].push(todo);
+        });
+        
+        const roomsWithTodos = Object.keys(byRoom).filter(r => byRoom[r].length > 0);
+        const priorityInfo = {
+            high: { label: 'High', color: 'var(--danger)', icon: '🔴' },
+            medium: { label: 'Medium', color: 'var(--warning)', icon: '🟡' },
+            low: { label: 'Low', color: 'var(--success)', icon: '🟢' }
+        };
+        
+        return roomsWithTodos.map(room => {
+            const roomTodos = byRoom[room];
+            
+            // Group room todos by priority
+            const byPriority = { high: [], medium: [], low: [] };
+            roomTodos.forEach(todo => {
+                const p = (todo.priority || 'medium').toLowerCase();
+                if (byPriority[p]) byPriority[p].push(todo);
+                else byPriority.medium.push(todo);
+            });
+            
+            return `
+                <div style="margin-bottom:20px;">
+                    <div style="font-weight:600;font-size:1rem;color:var(--primary);margin-bottom:12px;padding:8px 12px;background:var(--bg);border-radius:8px;display:flex;align-items:center;gap:8px;">
+                        📍 ${room} <span style="font-size:0.85rem;color:var(--text-muted);font-weight:400;">(${roomTodos.length})</span>
+                    </div>
+                    <div style="padding-left:12px;">
+                        ${['high', 'medium', 'low'].map(priority => {
+                            const pTodos = byPriority[priority];
+                            if (pTodos.length === 0) return '';
+                            const p = priorityInfo[priority];
+                            
+                            return `
+                                <div style="margin-bottom:16px;">
+                                    <div style="font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:${p.color};margin-bottom:8px;padding:6px 10px;background:rgba(255,255,255,0.02);border-radius:6px;border-left:3px solid ${p.color};">
+                                        ${p.icon} ${p.label} Priority (${pTodos.length})
+                                    </div>
+                                    <div class="list-container">
+                                        ${pTodos.map(todo => renderTodoItem(todo, p, isAdmin)).join('')}
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    };
+
+    // Render a single todo item row
+    const renderTodoItem = (todo, pInfo, isAdmin) => {
+        const color = getUserColorHex(todo.assigned_to);
+        const canToggle = todo.assigned_to === store.user.id || !todo.assigned_to || isAdmin;
+        const canDelete = isAdmin || todo.assigned_to === store.user.id;
+        
+        return `
+            <div class="list-item">
+                ${canToggle ? `
+                    <div class="checkbox ${todo.completed ? 'checked' : ''}" 
+                         onclick="toggleTodo('${todo.id}', ${!todo.completed})">
+                        ${todo.completed ? '✓' : ''}
+                    </div>
+                ` : '<div style="width:22px;"></div>'}
+                <div class="user-badge" style="background:${color};"></div>
+                <div class="list-content">
+                    <div class="list-title ${todo.completed ? 'completed' : ''}">${todo.title}</div>
+                    ${todo.description ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px;">${todo.description}</div>` : ''}
+                    <div class="list-meta">
+                        <span style="color:${pInfo.color};">${pInfo.icon} ${pInfo.label}</span>
+                        <span>👤 ${getUserName(todo.assigned_to)}</span>
+                    </div>
+                </div>
+                ${canDelete ? `
+                    <button class="btn btn-ghost btn-sm" onclick="deleteTodo('${todo.id}')">🗑️</button>
+                ` : ''}
+            </div>
+        `;
+    };
+
+    // Build page
+    let html = '<div class="fade-in">';
+    
+    html += `
+        <div style="display:flex;gap:8px;margin-bottom:20px;">
+            <button class="btn btn-primary" onclick="showAddTodoModal()">+ Add To-Do</button>
+        </div>
+    `;
+
+    if (isAdmin) {
+        const myTodos = activeTodos.filter(t => {
+            const assignedId = t.assigned_to?.id || t.assigned_to;
+            return assignedId === store.user?.id || !assignedId;
+        });
+        
+        html += `
+            <div class="card" style="margin-bottom:16px;padding:0;">
+                <div class="view-tabs">
+                    <button class="view-tab active" onclick="switchAdminView('my-todos')" id="view-tab-my-todos">
+                        ✅ My To-Dos
+                        ${myTodos.length > 0 ? `<span class="view-count">${myTodos.length}</span>` : ''}
+                    </button>
+                    <button class="view-tab" onclick="switchAdminView('overview')" id="view-tab-overview">
+                        👨‍👩‍👧‍👦 Family Overview
+                        ${activeTodos.length > 0 ? `<span class="view-count">${activeTodos.length}</span>` : ''}
+                    </button>
+                </div>
             </div>
             
-            ${renderTodoSection('My To-Dos', myTodos, true)}
-            ${renderTodoSection('Family To-Dos', familyTodos, false)}
-        </div>
-    `;
-}
+            <div id="admin-view-my-todos" class="admin-view-panel active">
+                ${myTodos.length === 0 ? 
+                    emptyState('✅', 'No To-Dos Assigned', 'You have no personal to-dos. Add some or check the Family Overview.') : 
+                    `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary);">
+                        ${buildPersonTabs(groupByPerson(myTodos), 'admin-my-todos')}
+                    </div>`
+                }
+            </div>
+            
+            <div id="admin-view-overview" class="admin-view-panel">
+                ${activeTodos.length === 0 ? 
+                    emptyState('👨‍👩‍👧‍👦', 'No Family To-Dos', 'Add to-dos to see them here.') : 
+                    `<div class="card" style="margin-bottom:16px;">
+                        ${buildPersonTabs(groupByPerson(activeTodos), 'admin-overview-todos')}
+                    </div>`
+                }
+            </div>
+        `;
+    } else {
+        const myTodos = activeTodos.filter(t => {
+            const assignedId = t.assigned_to?.id || t.assigned_to;
+            return assignedId === store.user?.id || !assignedId;
+        });
+        
+        if (myTodos.length === 0) {
+            html += emptyState('✅', 'No To-Dos', 'You have no pending tasks. Great job!');
+        } else {
+            html += `
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-header">
+                        <div class="card-title">✅ My To-Dos</div>
+                    </div>
+                    ${buildPersonTabs(groupByPerson(myTodos), 'my-todos')}
+                </div>
+            `;
+        }
+    }
 
-function renderTodoSection(title, todos, canToggle) {
-    if (todos.length === 0) return '';
-    
-    return `
-        <div class="card" style="margin-bottom:16px;">
-            <div class="card-header">
-                <div class="card-title">${title}</div>
-            </div>
-            <div class="list-container">
-                ${todos.map(todo => {
-                    const color = getUserColorHex(todo.assigned_to);
-                    const priorityClass = `priority-${todo.priority}`;
-                    return `
-                        <div class="list-item">
-                            ${canToggle ? `
-                                <div class="checkbox ${todo.completed ? 'checked' : ''}" 
-                                     onclick="toggleTodo('${todo.id}', ${!todo.completed})">
-                                    ${todo.completed ? '✓' : ''}
-                                </div>
-                            ` : '<div style="width:22px;"></div>'}
-                            <div class="user-badge" style="background:${color};"></div>
-                            <div class="list-content">
-                                <div class="list-title ${todo.completed ? 'completed' : ''}">${todo.title}</div>
-                                <div class="list-meta">
-                                    <span class="${priorityClass}">● ${todo.priority}</span>
-                                    ${todo.room ? `<span>📍 ${todo.room}</span>` : ''}
-                                    <span>👤 ${getUserName(todo.assigned_to)}</span>
-                                </div>
-                            </div>
-                            ${canToggle && (store.user?.role === 'admin' || store.user?.role === 'parent') ? `
-                                <button class="btn btn-ghost btn-sm" onclick="deleteTodo('${todo.id}')">🗑️</button>
-                            ` : ''}
-                        </div>
-                    `;
-                }).join('')}
-            </div>
-        </div>
-    `;
+    html += '</div>';
+    container.innerHTML = html;
 }
 
 function showAddTodoModal() {
@@ -1152,9 +1681,9 @@ function showAddTodoModal() {
             <div class="form-group">
                 <label class="form-label">Priority</label>
                 <select class="form-select" id="todoPriority">
-                    <option value="low">Low</option>
-                    <option value="medium" selected>Medium</option>
-                    <option value="high">High</option>
+                    <option value="low">🟢 Low</option>
+                    <option value="medium" selected>🟡 Medium</option>
+                    <option value="high">🔴 High</option>
                 </select>
             </div>
             <div class="form-group">
@@ -1165,12 +1694,13 @@ function showAddTodoModal() {
                 </select>
             </div>
         </div>
-            <div class="form-group">
-                <label class="form-label">Room/Location</label>
-                <select class="form-select" id="todoRoom">
-                    ${ROOMS.map(room => `<option value="${room}">${room}</option>`).join('')}
-                </select>
-            </div>
+        <div class="form-group">
+            <label class="form-label">Room/Location</label>
+            <select class="form-select" id="todoRoom">
+                <option value="">Unassigned</option>
+                ${ROOMS.map(room => `<option value="${room}">${room}</option>`).join('')}
+            </select>
+        </div>
         <button class="btn btn-primary w-full" onclick="submitTodo()">Add To-Do</button>
     `);
 }
@@ -1184,8 +1714,68 @@ async function submitTodo() {
     
     if (!title) { alert('Title is required'); return; }
     
-    const success = await addTodo(title, description, priority, assignedTo || null);
+    const success = await addTodo(title, description, priority, assignedTo || null, room || null);
     if (success) closeModal();
+}
+
+function renderTodoSection(title, todos, canToggle) {
+    if (todos.length === 0) return '';
+    
+    // Group by room
+    const byRoom = {};
+    ROOMS.forEach(r => byRoom[r] = []);
+    byRoom['Other'] = [];
+    byRoom['Unassigned'] = [];
+    
+    todos.forEach(todo => {
+        const room = todo.room || 'Unassigned';
+        if (byRoom[room]) byRoom[room].push(todo);
+        else byRoom['Other'].push(todo);
+    });
+    
+    const roomsWithTodos = Object.keys(byRoom).filter(r => byRoom[r].length > 0);
+    
+    return `
+        <div class="card" style="margin-bottom:16px;">
+            <div class="card-header">
+                <div class="card-title">${title}</div>
+            </div>
+            ${roomsWithTodos.map(room => `
+                <div style="margin-bottom:12px;">
+                    <div style="font-weight:600;font-size:0.9rem;color:var(--primary);padding:8px 20px;border-bottom:1px solid var(--surface-light);">
+                        ${room} <span style="font-size:0.8rem;color:var(--text-muted);">(${byRoom[room].length})</span>
+                    </div>
+                    <div class="list-container">
+                        ${byRoom[room].map(todo => {
+                            const color = getUserColorHex(todo.assigned_to);
+                            const priorityClass = `priority-${todo.priority}`;
+                            return `
+                                <div class="list-item">
+                                    ${canToggle ? `
+                                        <div class="checkbox ${todo.completed ? 'checked' : ''}" 
+                                             onclick="toggleTodo('${todo.id}', ${!todo.completed})">
+                                            ${todo.completed ? '✓' : ''}
+                                        </div>
+                                    ` : '<div style="width:22px;"></div>'}
+                                    <div class="user-badge" style="background:${color};"></div>
+                                    <div class="list-content">
+                                        <div class="list-title ${todo.completed ? 'completed' : ''}">${todo.title}</div>
+                                        <div class="list-meta">
+                                            <span class="${priorityClass}">● ${todo.priority}</span>
+                                            <span>👤 ${getUserName(todo.assigned_to)}</span>
+                                        </div>
+                                    </div>
+                                    ${canToggle && (store.user?.role === 'admin' || store.user?.role === 'parent') ? `
+                                        <button class="btn btn-ghost btn-sm" onclick="deleteTodo('${todo.id}')">🗑️</button>
+                                    ` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
 }
 
 // ==================== RENDER: SHOPPING LIST ====================
@@ -1290,6 +1880,119 @@ function emptyState(icon, title, subtitle) {
     `;
 }
 
+// ==================== CHORE COOLDOWN TIMER ====================
+// Returns the next available completion time based on recurrence
+function getNextCompletionTime(lastCompleted, recurrence) {
+    if (!lastCompleted) return null;
+    
+    const last = new Date(lastCompleted);
+    
+    // Get user's timezone offset in minutes (positive = behind UTC, negative = ahead)
+    const tzOffsetMin = new Date().getTimezoneOffset();
+    
+    // Convert last completed UTC to local time
+    const lastLocal = new Date(last.getTime() - (tzOffsetMin * 60 * 1000));
+    
+    let nextAvailable = new Date(lastLocal);
+    
+    switch (recurrence) {
+        case 'daily': {
+            // Next day at midnight local time
+            nextAvailable.setDate(nextAvailable.getDate() + 1);
+            nextAvailable.setHours(0, 0, 0, 0);
+            break;
+        }
+        case 'weekly': {
+            // Next Sunday at midnight local time
+            const dayOfWeek = nextAvailable.getDay(); // 0 = Sunday, 1 = Monday...
+            const daysUntilSunday = (7 - dayOfWeek) % 7;
+            nextAvailable.setDate(nextAvailable.getDate() + daysUntilSunday);
+            nextAvailable.setHours(0, 0, 0, 0);
+            // If same day, push to next Sunday
+            if (nextAvailable <= lastLocal) {
+                nextAvailable.setDate(nextAvailable.getDate() + 7);
+            }
+            break;
+        }
+        case 'monthly': {
+            // 1st of next month at midnight local time
+            nextAvailable.setMonth(nextAvailable.getMonth() + 1);
+            nextAvailable.setDate(1);
+            nextAvailable.setHours(0, 0, 0, 0);
+            break;
+        }
+        default:
+            return null;
+    }
+    
+    // Convert back to UTC for comparison with current time
+    return new Date(nextAvailable.getTime() + (tzOffsetMin * 60 * 1000));
+}
+
+// Format remaining time as readable string
+function formatCountdown(targetDate) {
+    if (!targetDate) return 'Ready!';
+    
+    const now = new Date();
+    const diff = targetDate - now;
+    
+    if (diff <= 0) return 'Ready!';
+    
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+    
+    if (days > 0) {
+        return `${days}d ${hours}h ${minutes}m`;
+    } else if (hours > 0) {
+        return `${hours}h ${minutes}m ${seconds}s`;
+    } else {
+        return `${minutes}m ${seconds}s`;
+    }
+}
+
+// Check if chore is available to complete
+function isChoreAvailable(chore) {
+    if (!chore.last_completed_at) return true;
+    if (!chore.recurrence || chore.recurrence === 'none') return true;
+    
+    const nextTime = getNextCompletionTime(chore.last_completed_at, chore.recurrence);
+    if (!nextTime) return true;
+    
+    return new Date() >= nextTime;
+}
+
+function startChoreTimerUpdates() {
+    if (window.choreTimerInterval) {
+        clearInterval(window.choreTimerInterval);
+    }
+    
+    window.choreTimerInterval = setInterval(() => {
+        document.querySelectorAll('.chore-timer, .chore-timer-inline').forEach(timerEl => {
+            const choreId = timerEl.id.replace('timer-', '').replace('timer-btn-', '');
+            const chore = store.chores.find(c => c.id === choreId);
+            if (!chore) return;
+            
+            const nextTime = getNextCompletionTime(chore.last_completed_at, chore.recurrence);
+            const available = isChoreAvailable(chore);
+            
+            if (available) {
+                timerEl.textContent = '⏳ Ready!';
+                timerEl.classList.add('ready');
+                if (!timerEl.dataset.reloaded) {
+                    timerEl.dataset.reloaded = 'true';
+                    setTimeout(() => {
+                        loadChores().then(() => renderPage('chores'));
+                    }, 2000);
+                }
+            } else {
+                timerEl.textContent = '⏳ ' + formatCountdown(nextTime);
+            }
+        });
+    }, 1000);
+}
+
 // ==================== RENDER: CHORES ====================
 function renderChores(container) {
     if (store.loading.chores) {
@@ -1310,45 +2013,168 @@ function renderChores(container) {
     return assignedId !== store.user?.id;
 });
 
-    // Group by room helper
-    const groupByRoom = (choreList) => {
+    // Group by person helper
+    const groupByPerson = (choreList) => {
         const grouped = {};
-        ROOMS.forEach(room => grouped[room] = []);
-        grouped['Other'] = [];
+        
+        // Initialize group for each family member
+        store.familyMembers.forEach(member => {
+            const name = member.display_name || member.username || 'Unknown';
+            grouped[name] = [];
+        });
+        grouped['Unassigned'] = [];
         
         choreList.forEach(chore => {
-            const room = chore.room || 'Other';
-            if (grouped[room]) grouped[room].push(chore);
-            else grouped['Other'].push(chore);
+            const assignedId = chore.assigned_to?.id || chore.assigned_to;
+            const member = store.familyMembers.find(m => m.id === assignedId);
+            const name = member ? (member.display_name || member.username) : 'Unassigned';
+            
+            if (grouped[name]) grouped[name].push(chore);
+            else grouped['Unassigned'].push(chore);
         });
         
         return grouped;
     };
 
-    // Build room tabs HTML
-    const buildRoomTabs = (choreMap, sectionId) => {
-        const roomsWithChores = Object.keys(choreMap).filter(r => choreMap[r].length > 0);
-        if (roomsWithChores.length === 0) return '';
+    // Build person tabs HTML with nested room+recurrence grouping
+    const buildPersonTabs = (choreMap, sectionId) => {
+        const peopleWithChores = Object.keys(choreMap).filter(p => choreMap[p].length > 0);
+        if (peopleWithChores.length === 0) return '';
         
         return `
             <div class="room-tabs" id="tabs-${sectionId}">
-                ${roomsWithChores.map((room, idx) => `
+                ${peopleWithChores.map((person, idx) => `
                     <button class="room-tab ${idx === 0 ? 'active' : ''}" 
-                            onclick="switchRoomTab('${sectionId}', '${room}')"
-                            data-room="${room}">
-                        ${room}
-                        <span class="room-count">${choreMap[room].length}</span>
+                            onclick="switchPersonTab('${sectionId}', '${person}')"
+                            data-person="${person}">
+                        ${person}
+                        <span class="room-count">${choreMap[person].length}</span>
                     </button>
                 `).join('')}
             </div>
             <div class="room-panels" id="panels-${sectionId}">
-                ${roomsWithChores.map((room, idx) => `
-                    <div class="room-panel ${idx === 0 ? 'active' : ''}" data-room="${room}">
-                        ${renderChoreList(choreMap[room])}
+                ${peopleWithChores.map((person, idx) => `
+                    <div class="room-panel ${idx === 0 ? 'active' : ''}" data-person="${person}">
+                        ${renderPersonChoreDetail(choreMap[person], person)}
                     </div>
                 `).join('')}
             </div>
         `;
+    };
+
+    // Render a person's chores grouped by (recurrence + room)
+    const renderPersonChoreDetail = (choreList, personName) => {
+        if (choreList.length === 0) return '<div class="empty-state-small">No chores for ' + personName + '</div>';
+        
+        // Group by recurrence first, then by room
+        const grouped = {};
+        
+        // Initialize structure: { daily: { Bathroom: [], Kitchen: [] }, weekly: {...} }
+        const recurrences = ['daily', 'weekly', 'monthly', 'none'];
+        recurrences.forEach(rec => {
+            grouped[rec] = {};
+            ROOMS.forEach(room => grouped[rec][room] = []);
+            grouped[rec]['Other'] = [];
+        });
+        
+        // Sort chores into buckets
+        choreList.forEach(chore => {
+            const rec = chore.recurrence || 'none';
+            const room = chore.room || 'Other';
+            
+            if (!grouped[rec]) grouped[rec] = { 'Other': [] };
+            if (!grouped[rec][room]) grouped[rec][room] = [];
+            
+            grouped[rec][room].push(chore);
+        });
+        
+        // Build HTML for each recurrence section
+        let html = '';
+        
+        const recLabels = {
+            daily: '📅 Daily',
+            weekly: '📆 Weekly', 
+            monthly: '🗓️ Monthly',
+            none: '📋 One Time'
+        };
+        
+        recurrences.forEach(rec => {
+            const rooms = grouped[rec];
+            const hasChores = Object.values(rooms).some(arr => arr.length > 0);
+            if (!hasChores) return;
+            
+            html += `
+                <div class="recurrence-section" style="margin-bottom:20px;">
+                    <div class="recurrence-header" style="font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);padding:8px 0;border-bottom:1px solid var(--surface-light);margin-bottom:12px;">
+                        ${recLabels[rec]}
+                    </div>
+            `;
+            
+            ROOMS.concat(['Other']).forEach(room => {
+                const roomChores = rooms[room];
+                if (roomChores.length === 0) return;
+                
+                html += `
+                    <div class="room-subsection" style="margin-bottom:16px;">
+                        <div class="room-subheader" style="font-weight:600;font-size:0.95rem;color:var(--primary);margin-bottom:8px;padding-left:8px;border-left:3px solid var(--primary);">
+                            ${room} <span style="font-size:0.8rem;color:var(--text-muted);font-weight:400;">(${roomChores.length})</span>
+                        </div>
+                        <div class="list-container" style="margin-left:8px;">
+                           ${roomChores.map(chore => {
+                            const points = chore.points || 0;
+                            const value = chore.value || 0;
+                            const isPending = store.pendingCompletions?.some(pc => 
+                                pc.chore_id === chore.id && pc.completed_by === store.user?.id && pc.status === 'pending'
+                            );
+                            
+                            const nextTime = getNextCompletionTime(chore.last_completed_at, chore.recurrence);
+                            const available = isChoreAvailable(chore);
+                            const timerText = nextTime ? formatCountdown(nextTime) : 'Ready!';
+                            
+                            // Determine visual state
+                            const isOnCooldown = !available && !isPending && chore.recurrence && chore.recurrence !== 'none';
+                            const isOneTimeDone = !available && !isPending && (!chore.recurrence || chore.recurrence === 'none');
+                            
+                            return `
+                                <div class="list-item ${isOnCooldown ? 'cooldown' : ''}" style="padding:12px 16px;" id="chore-row-${chore.id}">
+                                    <div class="list-content">
+                                        <div class="list-title">${chore.title}</div>
+                                        <div class="list-meta">
+                                            <span>🏷️ ${chore.category || 'General'}</span>
+                                            <span>⭐ ${points} pts</span>
+                                            <span>💰 $${value.toFixed(2)}</span>
+                                            ${chore.recurrence && chore.recurrence !== 'none' ? `<span>🔄 ${chore.recurrence}</span>` : ''}
+                                        </div>
+                                        ${chore.description ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">${chore.description}</div>` : ''}
+                                        ${isOnCooldown ? `<div style="font-size:0.75rem;color:var(--warning);margin-top:4px;">⏳ Available again in: <span class="chore-timer-inline" id="timer-${chore.id}">${timerText}</span></div>` : ''}
+                                        ${isOneTimeDone ? `<div style="font-size:0.75rem;color:var(--success);margin-top:4px;">✅ Completed</div>` : ''}
+                                    </div>
+                                    <div class="chore-actions">
+                                        ${isPending ? `
+                                            <span style="font-size:0.75rem;color:var(--warning);font-weight:600;">⏳ Pending Approval</span>
+                                        ` : available ? `
+                                            <button class="btn btn-primary btn-sm" onclick="completeChore('${chore.id}')">Complete</button>
+                                        ` : isOnCooldown ? `
+                                            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+                                                <button class="btn btn-primary btn-sm" disabled style="opacity:0.4;cursor:not-allowed;">Complete</button>
+                                                <div class="chore-timer" id="timer-btn-${chore.id}">⏳ ${timerText}</div>
+                                            </div>
+                                        ` : `
+                                            <button class="btn btn-primary btn-sm" disabled style="opacity:0.4;cursor:not-allowed;">Complete</button>
+                                        `}
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += `</div>`;
+        });
+        
+        return html;
     };
 
     // Render a flat list of chores
@@ -1448,7 +2274,7 @@ function renderChores(container) {
                     <div class="card-header">
                         <div class="card-title">🧹 My Chores</div>
                     </div>
-                    ${buildRoomTabs(myChoresByRoom, 'my-chores')}
+                    ${buildPersonTabs(myChoresByRoom, 'my-chores')}
                 </div>
             `;
         }
@@ -1477,7 +2303,7 @@ function renderChores(container) {
                             <div class="card-header">
                                 <div class="card-title">🧹 My Chores</div>
                             </div>
-                            ${buildRoomTabs(groupByRoom(myChores), 'admin-my')}
+                            ${buildPersonTabs(groupByPerson(myChores), 'admin-my')}
                         </div>`
                     }
                 </div>
@@ -1489,7 +2315,7 @@ function renderChores(container) {
                             <div class="card-header">
                                 <div class="card-title">👨‍👩‍👧‍👦 Family Overview</div>
                             </div>
-                            ${buildRoomTabs(groupByRoom(store.chores), 'admin-overview')}
+                            ${buildPersonTabs(groupByPerson(store.chores), 'admin-overview')}
                         </div>`
                     }
                 </div>
@@ -1498,6 +2324,8 @@ function renderChores(container) {
 
     html += `</div>`;
     container.innerHTML = html;
+    // Start live timer updates
+    startChoreTimerUpdates();
 }
 
 // ==================== ROOM TAB SWITCHING ====================
@@ -1513,6 +2341,22 @@ function switchRoomTab(sectionId, roomName) {
     if (panelsContainer) {
         panelsContainer.querySelectorAll('.room-panel').forEach(panel => {
             panel.classList.toggle('active', panel.dataset.room === roomName);
+        });
+    }
+}
+
+function switchPersonTab(sectionId, personName) {
+    const tabsContainer = document.getElementById(`tabs-${sectionId}`);
+    if (tabsContainer) {
+        tabsContainer.querySelectorAll('.room-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.person === personName);
+        });
+    }
+    
+    const panelsContainer = document.getElementById(`panels-${sectionId}`);
+    if (panelsContainer) {
+        panelsContainer.querySelectorAll('.room-panel').forEach(panel => {
+            panel.classList.toggle('active', panel.dataset.person === personName);
         });
     }
 }
@@ -1777,6 +2621,42 @@ async function submitRecipe() {
 // ==================== RENDER: CALENDAR ====================
 let calendarCurrentDate = new Date();
 
+// Helper: format a date for display, handling timezone correctly
+// For all-day events (midnight UTC), show the date as stored (don't convert timezone)
+// For timed events, convert to local time
+function formatEventDate(startTime, eventType) {
+    const date = new Date(startTime);
+    const isAllDay = eventType === 'birthday' || eventType === 'anniversary' || 
+                     (date.getUTCHours() === 0 && date.getUTCMinutes() === 0);
+
+    if (isAllDay) {
+        // For all-day events, extract the date parts directly from the ISO string
+        // to avoid timezone shifting the day
+        const isoStr = startTime;
+        const match = isoStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (match) {
+            const [, year, month, day] = match;
+            return `${parseInt(month)}/${parseInt(day)}/${year}`;
+        }
+        return date.toLocaleDateString();
+    }
+
+    // For timed events, convert to local time
+    return date.toLocaleDateString();
+}
+
+function formatEventTime(startTime, eventType) {
+    const date = new Date(startTime);
+    const isAllDay = eventType === 'birthday' || eventType === 'anniversary' || 
+                     (date.getUTCHours() === 0 && date.getUTCMinutes() === 0);
+
+    if (isAllDay) {
+        return 'All Day';
+    }
+
+    return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+}
+
 function renderCalendar(container) {
     const year = calendarCurrentDate.getFullYear();
     const month = calendarCurrentDate.getMonth();
@@ -1788,10 +2668,23 @@ function renderCalendar(container) {
     
     const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
     
-    // Filter events for this month
+    // Get today for comparison (midnight local time)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Filter events for this month's grid — SHOW ALL events for this month (past + future)
     const monthEvents = store.calendarEvents.filter(e => {
-        const eventDate = new Date(e.start_time);
-        return eventDate.getMonth() === month && eventDate.getFullYear() === year;
+        const isoMatch = e.start_time.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        let eventYear, eventMonth;
+        if (isoMatch) {
+            eventYear = parseInt(isoMatch[1]);
+            eventMonth = parseInt(isoMatch[2]) - 1;
+        } else {
+            const d = new Date(e.start_time);
+            eventYear = d.getFullYear();
+            eventMonth = d.getMonth();
+        }
+        return eventMonth === month && eventYear === year;
     });
 
     let daysHtml = '';
@@ -1803,15 +2696,19 @@ function renderCalendar(container) {
     
     // Actual days
     for (let day = 1; day <= daysInMonth; day++) {
-        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        const isToday = new Date().toDateString() === new Date(year, month, day).toDateString();
+        const isToday = today.getDate() === day && today.getMonth() === month && today.getFullYear() === year;
+        
+        // Find events for this day (extract day from ISO string to avoid timezone shift)
         const dayEvents = monthEvents.filter(e => {
-            const eventDate = new Date(e.start_time);
-            return eventDate.getDate() === day;
+            const isoMatch = e.start_time.match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (isoMatch) {
+                return parseInt(isoMatch[3]) === day;
+            }
+            return new Date(e.start_time).getDate() === day;
         });
         
         daysHtml += `
-            <div class="calendar-day ${isToday ? 'today' : ''}" onclick="showDayEvents('${dateStr}')">
+            <div class="calendar-day ${isToday ? 'today' : ''}" onclick="showDayEvents(${year}, ${month + 1}, ${day})">
                 <div class="calendar-day-number">${day}</div>
                 ${dayEvents.map(e => {
                     const color = getUserColorHex(e.assigned_to);
@@ -1820,6 +2717,23 @@ function renderCalendar(container) {
             </div>
         `;
     }
+
+    // Upcoming Events: next 30 days from today ONLY (exclude passed events)
+    const thirtyDaysFromNow = new Date(today);
+    thirtyDaysFromNow.setDate(today.getDate() + 30);
+    
+    const upcomingEvents = store.calendarEvents.filter(e => {
+        const isoMatch = e.start_time.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        let eventDateObj;
+        if (isoMatch) {
+            eventDateObj = new Date(parseInt(isoMatch[1]), parseInt(isoMatch[2]) - 1, parseInt(isoMatch[3]));
+        } else {
+            const d = new Date(e.start_time);
+            eventDateObj = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        }
+        eventDateObj.setHours(0, 0, 0, 0);
+        return eventDateObj >= today && eventDateObj <= thirtyDaysFromNow;
+    }).sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
 
     container.innerHTML = `
         <div class="fade-in">
@@ -1845,28 +2759,32 @@ function renderCalendar(container) {
             
             <div class="card" style="margin-top:20px;">
                 <div class="card-header">
-                    <div class="card-title">📅 Upcoming Events</div>
+                    <div class="card-title">📅 Upcoming Events (Next 30 Days)</div>
                 </div>
                 <div class="list-container">
-                    ${store.calendarEvents.slice(0, 10).map(event => {
-                        const color = getUserColorHex(event.assigned_to);
-                        const startDate = new Date(event.start_time);
-                        return `
-                            <div class="list-item">
-                                <div class="user-badge" style="background:${color};"></div>
-                                <div class="list-content">
-                                    <div class="list-title">${event.title}</div>
-                                    <div class="list-meta">
-                                        <span>📅 ${startDate.toLocaleDateString()}</span>
-                                        <span>🕐 ${startDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                        <span>🏷️ ${event.event_type || 'Event'}</span>
-                                        ${event.location ? `<span>📍 ${event.location}</span>` : ''}
-                                        <span>👤 ${getUserName(event.assigned_to) || 'Whole Family'}</span>
+                    ${upcomingEvents.length === 0 ? 
+                        '<div class="list-item"><div class="text-center" style="width:100%;color:var(--text-muted);padding:20px;">No upcoming events in the next 30 days</div></div>' :
+                        upcomingEvents.map(event => {
+                            const color = getUserColorHex(event.assigned_to);
+                            const dateStr = formatEventDate(event.start_time, event.event_type);
+                            const timeStr = formatEventTime(event.start_time, event.event_type);
+                            return `
+                                <div class="list-item">
+                                    <div class="user-badge" style="background:${color};"></div>
+                                    <div class="list-content">
+                                        <div class="list-title">${event.title}</div>
+                                        <div class="list-meta">
+                                            <span>📅 ${dateStr}</span>
+                                            <span>🕐 ${timeStr}</span>
+                                            <span>🏷️ ${event.event_type || 'Event'}</span>
+                                            ${event.location ? `<span>📍 ${event.location}</span>` : ''}
+                                            <span>👤 ${getUserName(event.assigned_to) || 'Whole Family'}</span>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        `;
-                    }).join('') || '<div class="list-item"><div class="text-center" style="width:100%;color:var(--text-muted);">No upcoming events</div></div>'}
+                            `;
+                        }).join('')
+                    }
                 </div>
             </div>
         </div>
@@ -1878,10 +2796,19 @@ function changeCalendarMonth(delta) {
     renderCalendar(document.getElementById('contentArea'));
 }
 
-function showDayEvents(dateStr) {
+function showDayEvents(year, month, day) {
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    
+    // Find events for this specific day (handle timezone correctly)
     const dayEvents = store.calendarEvents.filter(e => {
-        const eventDate = new Date(e.start_time);
-        return eventDate.toISOString().split('T')[0] === dateStr;
+        const isoMatch = e.start_time.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (isoMatch) {
+            return parseInt(isoMatch[1]) === year && 
+                   parseInt(isoMatch[2]) === month && 
+                   parseInt(isoMatch[3]) === day;
+        }
+        const d = new Date(e.start_time);
+        return d.getFullYear() === year && d.getMonth() + 1 === month && d.getDate() === day;
     });
     
     if (dayEvents.length === 0) {
@@ -1891,19 +2818,23 @@ function showDayEvents(dateStr) {
     
     showModal(`Events for ${dateStr}`, `
         <div class="list-container" style="margin-bottom:16px;">
-            ${dayEvents.map(e => `
-                <div class="list-item">
-                    <div class="list-content">
-                        <div class="list-title">${e.title}</div>
-                        <div class="list-meta">
-                            <span>🕐 ${new Date(e.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                            <span>🏷️ ${e.event_type}</span>
-                            ${e.location ? `<span>📍 ${e.location}</span>` : ''}
+            ${dayEvents.map(e => {
+                const timeStr = formatEventTime(e.start_time, e.event_type);
+                return `
+                    <div class="list-item">
+                        <div class="list-content">
+                            <div class="list-title">${e.title}</div>
+                            <div class="list-meta">
+                                <span>🕐 ${timeStr}</span>
+                                <span>🏷️ ${e.event_type}</span>
+                                ${e.location ? `<span>📍 ${e.location}</span>` : ''}
+                                <span>👤 ${getUserName(e.assigned_to) || 'Whole Family'}</span>
+                            </div>
+                            ${e.description ? `<div style="margin-top:8px;font-size:0.875rem;">${e.description}</div>` : ''}
                         </div>
-                        ${e.description ? `<div style="margin-top:8px;font-size:0.875rem;">${e.description}</div>` : ''}
                     </div>
-                </div>
-            `).join('')}
+                `;
+            }).join('')}
         </div>
         <button class="btn btn-primary w-full" onclick="closeModal(); showAddEventModal('${dateStr}')">+ Add Event</button>
     `);
@@ -1914,8 +2845,8 @@ function showAddEventModal(prefillDate = null) {
         `<option value="${m.id}">${m.display_name || m.username}</option>`
     ).join('');
     
-    const now = prefillDate ? new Date(prefillDate) : new Date();
-    const dateStr = now.toISOString().split('T')[0];
+    const now = prefillDate ? new Date(prefillDate + 'T00:00:00') : new Date();
+    const dateStr = prefillDate || now.toISOString().split('T')[0];
     const timeStr = '09:00';
     
     showModal('Add Event', `
@@ -1930,13 +2861,13 @@ function showAddEventModal(prefillDate = null) {
         <div class="form-group">
             <label class="form-label">Event Type *</label>
             <select class="form-select" id="eventType">
-                <option value="chore">Chore</option>
                 <option value="event">Event</option>
-                <option value="work">Work</option>
-                <option value="reminder">Reminder</option>
                 <option value="birthday">Birthday</option>
                 <option value="anniversary">Anniversary</option>
                 <option value="appointment">Appointment</option>
+                <option value="reminder">Reminder</option>
+                <option value="chore">Chore</option>
+                <option value="work">Work</option>
             </select>
         </div>
         <div class="form-row">
@@ -1988,10 +2919,21 @@ async function submitEvent() {
     
     if (!title || !startTime) { alert('Title and start time are required'); return; }
     
-    const success = await addCalendarEvent(title, description, startTime, endTime || null, eventType, location || null, assignedTo || null, recurrence || 'none');
+    // Convert datetime-local (no timezone) to proper ISO 8601 with UTC timezone
+    // datetime-local format: "2026-06-18T09:00"
+    // We need: "2026-06-18T09:00:00Z" for Supabase timestamptz
+    const toISOString = (dtLocal) => {
+        if (!dtLocal) return null;
+        // Append :00 seconds and Z to make it valid ISO 8601 UTC
+        return dtLocal + ':00Z';
+    };
+    
+    const isoStart = toISOString(startTime);
+    const isoEnd = toISOString(endTime);
+    
+    const success = await addCalendarEvent(title, description, isoStart, isoEnd, eventType, location || null, assignedTo || null, recurrence || 'none');
     if (success) closeModal();
 }
-
 // ==================== RENDER: MESSAGES ====================
 function renderMessages(container) {
     container.innerHTML = `

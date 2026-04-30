@@ -6,6 +6,18 @@
     <title>HomeHub Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+    <script>
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    OneSignalDeferred.push(async function(OneSignal) {
+        await OneSignal.init({
+        appId: "a852ae54-e345-4bb6-8c85-8275814974df",
+        notifyButton: { enable: false },
+        allowLocalhostAsSecureOrigin: true,
+        });
+    });
+    </script>
+
 </head>
 <body>
     <div id="authScreen" class="auth-screen">
@@ -122,6 +134,22 @@
                     <h1 class="page-title" id="pageTitle">Dashboard</h1>
                 </div>
                 <div class="header-actions">
+                    <!-- NEW: Notification Bell -->
+                    <div class="notification-wrapper">
+                        <button class="btn btn-ghost notification-bell" onclick="toggleNotificationPanel()">
+                            🔔
+                            <span class="notification-badge hidden" id="notificationBadge">0</span>
+                        </button>
+                        <div class="notification-panel hidden" id="notificationPanel">
+                            <div class="notification-header">
+                                <span class="notification-title">Notifications</span>
+                                <button class="btn btn-ghost btn-sm" onclick="markAllRead()">Mark all read</button>
+                            </div>
+                            <div class="notification-list" id="notificationList">
+                                <div class="notification-empty">No notifications</div>
+                            </div>
+                        </div>
+                    </div>
                     <button class="btn btn-ghost" onclick="refreshData()">🔄 Refresh</button>
                     <button class="btn btn-primary" id="addBtn" onclick="showAddModal()">+ Add New</button>
                 </div>
