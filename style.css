@@ -84,14 +84,7 @@ body {
 .logo {
     width: 40px;
     height: 40px;
-    background: linear-gradient(135deg, var(--primary), var(--secondary));
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: bold;
-    font-size: 20px;
-    color: white;
+    background: url('logo.png') center/contain no-repeat;
 }
 
 .sidebar-title {
@@ -252,7 +245,7 @@ body {
 .btn-primary:hover {
     background: var(--primary-dark);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    box-shadow: 0 4px 12px rgba(9, 255, 0, 0.3);
 }
 
 .btn-ghost {
