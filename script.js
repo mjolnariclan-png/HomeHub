@@ -1496,19 +1496,6 @@ function renderChores(container) {
             `;
         }
 
-        // Section 2: Family Overview (everyone's chores, room tabs)
-        if (store.chores.length > 0) {
-            const allChoresByRoom = groupByRoom(store.chores);
-            html += `
-                <div class="card" style="margin-bottom:16px;">
-                    <div class="card-header">
-                        <div class="card-title">👨‍👩‍👧‍👦 Family Overview</div>
-                    </div>
-                    ${buildRoomTabs(allChoresByRoom, 'admin-overview')}
-                </div>
-            `;
-        }
-    
     html += `</div>`;
     container.innerHTML = html;
 }
@@ -1546,45 +1533,7 @@ function switchAdminView(viewName) {
     const activePanel = document.getElementById(`admin-view-${viewName}`);
     if (activePanel) activePanel.classList.add('active');
 }
-function renderChoreSection(title, chores) {
-    if (chores.length === 0) return '';
-    
-    return `
-        <div class="card" style="margin-bottom:16px;">
-            <div class="card-header">
-                <div class="card-title">${title}</div>
-            </div>
-            <div class="list-container">
-                ${chores.map(chore => {
-                    const color = getUserColorHex(chore.assigned_to);
-                    const assignedName = getUserName(chore.assigned_to);
-                    const points = chore.points || 0;
-                    const value = chore.value || 0;
-                    
-                    return `
-                        <div class="list-item">
-                            <div class="user-badge" style="background:${color};"></div>
-                            <div class="list-content">
-                                <div class="list-title">${chore.title}</div>
-                                <div class="list-meta">
-                                    <span>📍 ${chore.room || 'Anywhere'}</span>
-                                    <span>👤 ${assignedName}</span>
-                                    <span>🏷️ ${chore.category || 'General'}</span>
-                                    <span>⭐ ${points} pts</span>
-                                    <span>💰 $${value.toFixed(2)}</span>
-                                </div>
-                                ${chore.description ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">${chore.description}</div>` : ''}
-                            </div>
-                            ${!store.pendingCompletions || !store.pendingCompletions.find(pc => pc.chore_id === chore.id && pc.completed_by === store.user.id && pc.status === 'pending') ? `
-                                <button class="btn btn-primary btn-sm" onclick="completeChore('${chore.id}')">Complete</button>
-                            ` : '<span style="font-size:0.75rem;color:var(--warning);">⏳ Pending</span>'}
-                        </div>
-                    `;
-                }).join('')}
-            </div>
-        </div>
-    `;
-}
+
 
 function showAddChoreModal() {
     const memberOptions = store.familyMembers.map(m => 

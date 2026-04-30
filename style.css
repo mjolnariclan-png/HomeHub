@@ -842,3 +842,57 @@ body {
     color: var(--text-muted);
     font-size: 0.875rem;
 }
+
+
+/* ==================== ADMIN VIEW TOGGLE TABS ==================== */
+.view-tabs {
+    display: flex;
+    gap: 0;
+    background: var(--bg);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.view-tab {
+    flex: 1;
+    padding: 16px 20px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 600;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    position: relative;
+}
+
+.view-tab:hover {
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--text);
+}
+
+.view-tab.active {
+    background: var(--primary);
+    color: white;
+}
+
+.view-count {
+    background: rgba(255,255,255,0.2);
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.admin-view-panel {
+    display: none;
+}
+
+.admin-view-panel.active {
+    display: block;
+    animation: fadeIn 0.3s ease;
+}
