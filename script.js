@@ -1454,17 +1454,44 @@ function renderChores(container) {
         }
     }
 
-    // ADMIN VIEW: My Chores + Overview
-    if (isAdmin) {
-        // Section 1: My Chores (only mine, room tabs)
-        if (myChores.length > 0) {
-            const myChoresByRoom = groupByRoom(myChores);
+        // ADMIN VIEW: My Chores + Overview with toggle tabs
+        if (isAdmin) {
             html += `
-                <div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary);">
-                    <div class="card-header">
-                        <div class="card-title">🧹 My Chores</div>
+                <div class="card" style="margin-bottom:16px;padding:0;">
+                    <div class="view-tabs">
+                        <button class="view-tab active" onclick="switchAdminView('my-chores')" id="view-tab-my-chores">
+                            🧹 My Chores
+                            ${myChores.length > 0 ? `<span class="view-count">${myChores.length}</span>` : ''}
+                        </button>
+                        <button class="view-tab" onclick="switchAdminView('overview')" id="view-tab-overview">
+                            👨‍👩‍👧‍👦 Family Overview
+                            ${store.chores.length > 0 ? `<span class="view-count">${store.chores.length}</span>` : ''}
+                        </button>
                     </div>
-                    ${buildRoomTabs(myChoresByRoom, 'admin-my')}
+                </div>
+                
+                <div id="admin-view-my-chores" class="admin-view-panel active">
+                    ${myChores.length === 0 ? 
+                        emptyState('🧹', 'No Chores Assigned', 'You have no personal chores. Add some or check the Family Overview.') : 
+                        `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary);">
+                            <div class="card-header">
+                                <div class="card-title">🧹 My Chores</div>
+                            </div>
+                            ${buildRoomTabs(groupByRoom(myChores), 'admin-my')}
+                        </div>`
+                    }
+                </div>
+                
+                <div id="admin-view-overview" class="admin-view-panel">
+                    ${store.chores.length === 0 ? 
+                        emptyState('👨‍👩‍👧‍👦', 'No Family Chores', 'Add chores to see them here.') : 
+                        `<div class="card" style="margin-bottom:16px;">
+                            <div class="card-header">
+                                <div class="card-title">👨‍👩‍👧‍👦 Family Overview</div>
+                            </div>
+                            ${buildRoomTabs(groupByRoom(store.chores), 'admin-overview')}
+                        </div>`
+                    }
                 </div>
             `;
         }
@@ -1481,8 +1508,7 @@ function renderChores(container) {
                 </div>
             `;
         }
-    }
-
+    
     html += `</div>`;
     container.innerHTML = html;
 }
@@ -1502,6 +1528,23 @@ function switchRoomTab(sectionId, roomName) {
             panel.classList.toggle('active', panel.dataset.room === roomName);
         });
     }
+}
+
+// ==================== ADMIN VIEW SWITCHING ====================
+function switchAdminView(viewName) {
+    // Update tab buttons
+    document.querySelectorAll('.view-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    const activeTab = document.getElementById(`view-tab-${viewName}`);
+    if (activeTab) activeTab.classList.add('active');
+    
+    // Update panels
+    document.querySelectorAll('.admin-view-panel').forEach(panel => {
+        panel.classList.remove('active');
+    });
+    const activePanel = document.getElementById(`admin-view-${viewName}`);
+    if (activePanel) activePanel.classList.add('active');
 }
 function renderChoreSection(title, chores) {
     if (chores.length === 0) return '';
