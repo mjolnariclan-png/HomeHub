@@ -35,6 +35,14 @@ const store = {
 };
 
 
+// ==================== ROOM CONFIGURATION ====================
+const ROOMS = [
+    'Bathroom', 'Kitchen', 'Living Room', 'Boys Bedroom', 'Girls Bedroom',
+    'Playroom', 'Van', 'Truck', 'Outside', 'Random',
+    'Zues (Dog)', 'Turbo (Cat)', 'Mom and Dads Room',
+    'Dads Game Room', 'Moms Art/Laundry Room'
+];
+
 let signupMode = 'create';
 
 function setSignupMode(mode) {
@@ -52,8 +60,17 @@ function setSignupMode(mode) {
     }
 }
 
-// ==================== USER COLOR MAP ====================
 function getUserColor(userId) {
+    // Handle Supabase joined object: { id, display_name, username }
+    if (userId && typeof userId === 'object') {
+        const name = (userId.display_name || userId.username || '').toLowerCase();
+        if (name.includes('mom')) return 'var(--color-mom)';
+        if (name.includes('dad')) return 'var(--color-dad)';
+        if (name.includes('jaxon')) return 'var(--color-jaxon)';
+        if (name.includes('peyton')) return 'var(--color-peyton)';
+        return 'var(--color-default)';
+    }
+    // Handle raw UUID string
     const member = store.familyMembers.find(m => m.id === userId);
     if (!member) return 'var(--color-default)';
     const name = (member.display_name || member.username || '').toLowerCase();
@@ -65,6 +82,16 @@ function getUserColor(userId) {
 }
 
 function getUserColorHex(userId) {
+    // Handle Supabase joined object: { id, display_name, username }
+    if (userId && typeof userId === 'object') {
+        const name = (userId.display_name || userId.username || '').toLowerCase();
+        if (name.includes('mom')) return '#22c55e';
+        if (name.includes('dad')) return '#ef4444';
+        if (name.includes('jaxon')) return '#3b82f6';
+        if (name.includes('peyton')) return '#ec4899';
+        return '#6366f1';
+    }
+    // Handle raw UUID string
     const member = store.familyMembers.find(m => m.id === userId);
     if (!member) return '#6366f1';
     const name = (member.display_name || member.username || '').toLowerCase();
@@ -76,6 +103,11 @@ function getUserColorHex(userId) {
 }
 
 function getUserName(userId) {
+    // Handle Supabase joined object: { id, display_name, username }
+    if (userId && typeof userId === 'object') {
+        return userId.display_name || userId.username || 'Unknown';
+    }
+    // Handle raw UUID string
     const member = store.familyMembers.find(m => m.id === userId);
     return member ? (member.display_name || member.username) : 'Unknown';
 }
@@ -478,7 +510,7 @@ async function loadChores() {
     // Load active chores
     const { data, error } = await supabaseClient
         .from('chores')
-        .select(`*, assigned_to:profiles!chores_assigned_to_fkey(id, display_name, username)`)
+        .select('*, profiles!chores_assigned_to_fkey(id, display_name, username)')
         .eq('family_id', store.user.family_id)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
@@ -1133,27 +1165,12 @@ function showAddTodoModal() {
                 </select>
             </div>
         </div>
-        <div class="form-group">
-            <label class="form-label">Room/Location</label>
-            <select class="form-select" id="todoRoom">
-                <option value="">None</option>
-                <option value="Bathroom">Bathroom</option>
-                <option value="Kitchen">Kitchen</option>
-                <option value="Living Room">Living Room</option>
-                <option value="Boys Bedroom">Boys Bedroom</option>
-                <option value="Girls Bedroom">Girls Bedroom</option>
-                <option value="Playroom">Playroom</option>
-                <option value="Van">Van</option>
-                <option value="Truck">Truck</option>
-                <option value="Outside">Outside</option>
-                <option value="Random">Random</option>
-                <option value="Zues (Dog)">Zues (Dog)</option>
-                <option value="Turbo (Cat)">Turbo (Cat)</option>
-                <option value="Mom and Dads Room">Mom and Dads Room</option>
-                <option value="Dads Game Room">Dads Game Room</option>
-                <option value="Moms Art/Laundry Room">Moms Art/Laundry Room</option>
-            </select>
-        </div>
+            <div class="form-group">
+                <label class="form-label">Room/Location</label>
+                <select class="form-select" id="todoRoom">
+                    ${ROOMS.map(room => `<option value="${room}">${room}</option>`).join('')}
+                </select>
+            </div>
         <button class="btn btn-primary w-full" onclick="submitTodo()">Add To-Do</button>
     `);
 }
@@ -1281,76 +1298,211 @@ function renderChores(container) {
     }
 
     const isAdmin = store.user?.role === 'admin' || store.user?.role === 'parent';
-    const daily = store.chores.filter(c => c.recurrence === 'daily' || !c.recurrence || c.recurrence === 'none');
-    const weekly = store.chores.filter(c => c.recurrence === 'weekly');
-    const monthly = store.chores.filter(c => c.recurrence === 'monthly');
+    const isChild = !isAdmin;
 
-    container.innerHTML = `
-        <div class="fade-in">
+    // Filter chores based on role
+    const myChores = store.chores.filter(c => {
+    const assignedId = c.assigned_to?.id || c.assigned_to;
+    return assignedId === store.user?.id;
+});
+    const otherChores = store.chores.filter(c => {
+    const assignedId = c.assigned_to?.id || c.assigned_to;
+    return assignedId !== store.user?.id;
+});
+
+    // Group by room helper
+    const groupByRoom = (choreList) => {
+        const grouped = {};
+        ROOMS.forEach(room => grouped[room] = []);
+        grouped['Other'] = [];
+        
+        choreList.forEach(chore => {
+            const room = chore.room || 'Other';
+            if (grouped[room]) grouped[room].push(chore);
+            else grouped['Other'].push(chore);
+        });
+        
+        return grouped;
+    };
+
+    // Build room tabs HTML
+    const buildRoomTabs = (choreMap, sectionId) => {
+        const roomsWithChores = Object.keys(choreMap).filter(r => choreMap[r].length > 0);
+        if (roomsWithChores.length === 0) return '';
+        
+        return `
+            <div class="room-tabs" id="tabs-${sectionId}">
+                ${roomsWithChores.map((room, idx) => `
+                    <button class="room-tab ${idx === 0 ? 'active' : ''}" 
+                            onclick="switchRoomTab('${sectionId}', '${room}')"
+                            data-room="${room}">
+                        ${room}
+                        <span class="room-count">${choreMap[room].length}</span>
+                    </button>
+                `).join('')}
+            </div>
+            <div class="room-panels" id="panels-${sectionId}">
+                ${roomsWithChores.map((room, idx) => `
+                    <div class="room-panel ${idx === 0 ? 'active' : ''}" data-room="${room}">
+                        ${renderChoreList(choreMap[room])}
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    };
+
+    // Render a flat list of chores
+    const renderChoreList = (choreList) => {
+        if (choreList.length === 0) return '<div class="empty-state-small">No chores here</div>';
+        
+        return `
+            <div class="list-container">
+                ${choreList.map(chore => {
+                    const color = getUserColorHex(chore.assigned_to);
+                    const assignedName = getUserName(chore.assigned_to);
+                    const points = chore.points || 0;
+                    const value = chore.value || 0;
+                    const isPending = store.pendingCompletions?.some(pc => 
+                        pc.chore_id === chore.id && pc.completed_by === store.user?.id && pc.status === 'pending'
+                    );
+                    
+                    return `
+                        <div class="list-item">
+                            <div class="user-badge" style="background:${color};"></div>
+                            <div class="list-content">
+                                <div class="list-title">${chore.title}</div>
+                                <div class="list-meta">
+                                    <span>👤 ${assignedName}</span>
+                                    <span>🏷️ ${chore.category || 'General'}</span>
+                                    <span>⭐ ${points} pts</span>
+                                    <span>💰 $${value.toFixed(2)}</span>
+                                    ${chore.recurrence && chore.recurrence !== 'none' ? `<span>🔄 ${chore.recurrence}</span>` : ''}
+                                </div>
+                                ${chore.description ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">${chore.description}</div>` : ''}
+                            </div>
+                            ${!isPending ? `
+                                <button class="btn btn-primary btn-sm" onclick="completeChore('${chore.id}')">Complete</button>
+                            ` : '<span style="font-size:0.75rem;color:var(--warning);">⏳ Pending</span>'}
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
+    };
+
+    // Start building the page
+    let html = `<div class="fade-in">`;
+    
+    // Add button (admins only)
+    if (isAdmin) {
+        html += `
             <div style="display:flex;gap:8px;margin-bottom:20px;">
                 <button class="btn btn-primary" onclick="showAddChoreModal()">+ Add Chore</button>
             </div>
-            
-            ${isAdmin && store.pendingCompletions && store.pendingCompletions.length > 0 ? `
-                <div class="card" style="margin-bottom:16px;border:2px solid var(--warning);">
-                    <div class="card-header">
-                        <div class="card-title" style="color:var(--warning);">⏳ Pending Approvals (${store.pendingCompletions.length})</div>
-                    </div>
-                    <div class="list-container">
-                        ${store.pendingCompletions.map(pc => {
-                            const color = getUserColorHex(pc.completed_by);
-                            const member = store.familyMembers.find(m => m.id === pc.completed_by);
-                            const chore = pc.chore;
-                            return `
-                                <div class="list-item" style="background:rgba(245, 158, 11, 0.05);">
-                                    <div class="user-badge" style="background:${color};"></div>
-                                    <div class="list-content">
-                                        <div class="list-title">${chore?.title || 'Unknown Chore'}</div>
-                                        <div class="list-meta">
-                                            <span>👤 ${getUserName(pc.completed_by)}</span>
-                                            <span>⭐ ${chore?.points || 0} pts</span>
-                                            <span>💰 $${(chore?.value || 0).toFixed(2)}</span>
-                                            <span>⏰ ${new Date(pc.created_at).toLocaleDateString()}</span>
-                                        </div>
-                                    </div>
-                                    <div style="display:flex;gap:8px;">
-                                        <button class="btn btn-primary btn-sm" onclick="approveChore('${pc.id}', '${pc.chore_id}', '${pc.completed_by}', ${chore?.points || 0}, ${chore?.value || 0})">✓ Approve</button>
-                                        <button class="btn btn-danger btn-sm" onclick="rejectChore('${pc.id}')">✕ Reject</button>
+        `;
+    }
+
+    // Pending Approvals (admins only, at top)
+    if (isAdmin && store.pendingCompletions?.length > 0) {
+        html += `
+            <div class="card" style="margin-bottom:16px;border:2px solid var(--warning);">
+                <div class="card-header">
+                    <div class="card-title" style="color:var(--warning);">⏳ Pending Approvals (${store.pendingCompletions.length})</div>
+                </div>
+                <div class="list-container">
+                    ${store.pendingCompletions.map(pc => {
+                        const color = getUserColorHex(pc.completed_by);
+                        const chore = pc.chore;
+                        return `
+                            <div class="list-item" style="background:rgba(245, 158, 11, 0.05);">
+                                <div class="user-badge" style="background:${color};"></div>
+                                <div class="list-content">
+                                    <div class="list-title">${chore?.title || 'Unknown Chore'}</div>
+                                    <div class="list-meta">
+                                        <span>👤 ${getUserName(pc.completed_by)}</span>
+                                        <span>⭐ ${chore?.points || 0} pts</span>
+                                        <span>💰 $${(chore?.value || 0).toFixed(2)}</span>
+                                        <span>⏰ ${new Date(pc.created_at).toLocaleDateString()}</span>
                                     </div>
                                 </div>
-                            `;
-                        }).join('')}
-                    </div>
-                </div>
-            ` : ''}
-            
-            ${!isAdmin && store.pendingCompletions?.length > 0 ? `
-                <div class="card" style="margin-bottom:16px;opacity:0.7;">
-                    <div class="card-header">
-                        <div class="card-title">⏳ Awaiting Approval</div>
-                    </div>
-                    <div class="list-container">
-                        ${store.pendingCompletions.map(pc => `
-                            <div class="list-item">
-                                <div class="list-content">
-                                    <div class="list-title">${pc.chore?.title || 'Unknown Chore'}</div>
-                                    <div class="list-meta">
-                                        <span>Submitted on ${new Date(pc.created_at).toLocaleDateString()}</span>
-                                    </div>
+                                <div style="display:flex;gap:8px;">
+                                    <button class="btn btn-primary btn-sm" onclick="approveChore('${pc.id}', '${pc.chore_id}', '${pc.completed_by}', ${chore?.points || 0}, ${chore?.value || 0})">✓ Approve</button>
+                                    <button class="btn btn-danger btn-sm" onclick="rejectChore('${pc.id}')">✕ Reject</button>
                                 </div>
                             </div>
-                        `).join('')}
-                    </div>
+                        `;
+                    }).join('')}
                 </div>
-            ` : ''}
-            
-            ${renderChoreSection('📅 Daily Chores', daily)}
-            ${renderChoreSection('📆 Weekly Chores', weekly)}
-            ${renderChoreSection('🗓️ Monthly Chores', monthly)}
-        </div>
-    `;
+            </div>
+        `;
+    }
+
+    // CHILD VIEW: Only their chores, grouped by room
+    if (isChild) {
+        if (myChores.length === 0) {
+            html += emptyState('🧹', 'No Chores Assigned', 'You have no chores right now. Enjoy your free time!');
+        } else {
+            const myChoresByRoom = groupByRoom(myChores);
+            html += `
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-header">
+                        <div class="card-title">🧹 My Chores</div>
+                    </div>
+                    ${buildRoomTabs(myChoresByRoom, 'my-chores')}
+                </div>
+            `;
+        }
+    }
+
+    // ADMIN VIEW: My Chores + Overview
+    if (isAdmin) {
+        // Section 1: My Chores (only mine, room tabs)
+        if (myChores.length > 0) {
+            const myChoresByRoom = groupByRoom(myChores);
+            html += `
+                <div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary);">
+                    <div class="card-header">
+                        <div class="card-title">🧹 My Chores</div>
+                    </div>
+                    ${buildRoomTabs(myChoresByRoom, 'admin-my')}
+                </div>
+            `;
+        }
+
+        // Section 2: Family Overview (everyone's chores, room tabs)
+        if (store.chores.length > 0) {
+            const allChoresByRoom = groupByRoom(store.chores);
+            html += `
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-header">
+                        <div class="card-title">👨‍👩‍👧‍👦 Family Overview</div>
+                    </div>
+                    ${buildRoomTabs(allChoresByRoom, 'admin-overview')}
+                </div>
+            `;
+        }
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
 }
 
+// ==================== ROOM TAB SWITCHING ====================
+function switchRoomTab(sectionId, roomName) {
+    const tabsContainer = document.getElementById(`tabs-${sectionId}`);
+    if (tabsContainer) {
+        tabsContainer.querySelectorAll('.room-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.room === roomName);
+        });
+    }
+    
+    const panelsContainer = document.getElementById(`panels-${sectionId}`);
+    if (panelsContainer) {
+        panelsContainer.querySelectorAll('.room-panel').forEach(panel => {
+            panel.classList.toggle('active', panel.dataset.room === roomName);
+        });
+    }
+}
 function renderChoreSection(title, chores) {
     if (chores.length === 0) return '';
     
@@ -1430,21 +1582,7 @@ function showAddChoreModal() {
             <div class="form-group">
                 <label class="form-label">Room/Location</label>
                 <select class="form-select" id="choreRoom">
-                    <option value="Bathroom">Bathroom</option>
-                    <option value="Kitchen">Kitchen</option>
-                    <option value="Living Room">Living Room</option>
-                    <option value="Boys Bedroom">Boys Bedroom</option>
-                    <option value="Girls Bedroom">Girls Bedroom</option>
-                    <option value="Playroom">Playroom</option>
-                    <option value="Van">Van</option>
-                    <option value="Truck">Truck</option>
-                    <option value="Outside">Outside</option>
-                    <option value="Random">Random</option>
-                    <option value="Zues (Dog)">Zues (Dog)</option>
-                    <option value="Turbo (Cat)">Turbo (Cat)</option>
-                    <option value="Mom and Dads Room">Mom and Dads Room</option>
-                    <option value="Dads Game Room">Dads Game Room</option>
-                    <option value="Moms Art/Laundry Room">Moms Art/Laundry Room</option>
+                    ${ROOMS.map(room => `<option value="${room}">${room}</option>`).join('')}
                 </select>
             </div>
         </div>

@@ -776,3 +776,69 @@ body {
 .items-center { align-items: center; }
 .justify-between { justify-content: space-between; }
 .w-full { width: 100%; }
+
+
+/* ==================== ROOM TABS ==================== */
+.room-tabs {
+    display: flex;
+    gap: 8px;
+    padding: 0 20px 16px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--surface-light);
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.room-tab {
+    padding: 8px 16px;
+    background: var(--bg);
+    border: 1px solid var(--surface-light);
+    border-radius: 20px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.2s;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.room-tab:hover {
+    background: var(--surface-light);
+    color: var(--text);
+}
+
+.room-tab.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+.room-count {
+    background: rgba(255,255,255,0.2);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+}
+
+.room-panels {
+    position: relative;
+}
+
+.room-panel {
+    display: none;
+}
+
+.room-panel.active {
+    display: block;
+    animation: fadeIn 0.2s ease;
+}
+
+.empty-state-small {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-muted);
+    font-size: 0.875rem;
+}
