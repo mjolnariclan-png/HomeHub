@@ -1,0 +1,172 @@
+lets do a to do and shopping list. but with to do, and chores. those are supposed to be account specific for the family. 
+
+Ex: Like if there were 4 people in the family
+
+
+Mom
+Dad
+Jaxon
+Peyton
+
+
+
+To do
+
+Take Jaxon to Basketball Practice = Dad = Red box
+Call Doctor office for foot = Mom = Green Box
+Finish Packing toys = Jaxon = Blue Box
+Place Read books in library bad to take back to library = Peyton = Pink Box. 
+
+
+Chores. 
+
+Daily - Weekly - Monthly
+
+Dad = Red
+Mom = Green
+Jaxon = Blue
+Peyton = Pink
+
+Sweep Kids Room = Red = 2 pt/ $1
+Empty Bathroom Trash = Blue = 1 pt/ $ 0.5 
+
+so on for chores. but everything needs to be able to be added in the app. and linked to supabase. 
+
+Every chore will have place
+Bathroom = Jaxon/Peyton/Parents
+Kitchen = Jaxon/Peyton/Parents
+Livingroom = Jaxon/Peyton/Parents
+Boys Bedroom = Jaxon/Parent
+Girls Bedroom = Peyton/Parent
+Playroom = Jaxon/Peyton
+Van = Jaxon/Peyton/Parents
+Truck = Jaxon/Peyton/Parents
+Outside = Jaxon/Peyton/Parents
+Random = Jaxon/Peyton/Parents
+Zues(Dog) = Jaxon/Peyton/Parents
+Turbo(Cat) = Jaxon/Peyton/Parents
+Mom and Dads Room = Mom and Dad
+Dads Game Room = Dad
+Moms Art Room/Laundry Room = Mom
+
+shopping needs to be able to be added then checked off and once checked off deleted after blox saying shopping is done is clicked. so things arent bought twice from same list
+
+need real time sync across devices. 
+
+recipes need to have
+
+Food Type (Drink/Appetizer/Entree/Snack)
+Food Name = Ex. Tacos
+Item 1 = Ground Beef | Amount 1= 1 Pound 
+Item 2 = Taco Seasoning | Amount 2 = 1 Packet
+if more items "Add Item 3+" 
+
+Calendar
+Needs to have
+Event Title * = 
+Description (optional)
+Event Type*
+-Anniversaries
+-Appointments
+-Work Schedule
+-Events
+-Reminder
+Start Date & Time*
+End Date & Time(optional)
+Location(optional)
+Assigned To (Whole Family, Specific Person)
+Repeat
+-Daily(add how many days apart if needed)
+-Weekly(add how many weeks apart if needed)
+-Monthly(add how many months apart if needed)
+-Yearly(add how many years apart if needed)
+
+A Store Page for Kids to use their money gained from chores. 
+Type(Event/Item/Money Exchange)
+Amount($)
+Description()
+
+
+Budget
+Total Income for month
+Total Expenses for Month
+Balance Left Over
+
+Add Entries for Budget on spending/income
+Types of Spending 
+-Bills
+-Shopping
+-Random
+-Recurring
+-Savings
+
+
+Leaderboard needs to display who has most points. 
+Whole Family is listed
+
+
+
+Messaging Between people on here for those who need to have it in one place. 
+
+
+Admin Profile 
+Display Name(changeable)
+Username (unchangeable)
+Role(Unchangeable)
+
+Family
+Family Name(changeable)
+Family Code(unchangeable)
+
+Users
+User 1 = Admin
+User 2+ = Users(Aside from Parents/Adults)
+Log Out
+
+
+Main Dashboard. 
+Points Display
+Balance (Admin/Parents/Adults Only)
+Level (Based off points scalable) 
+Level 1 1.0x Multiplier on points/money
+Level 2 1.1x Multiplier on points/money
+Level 3 1.2x Multiplier on points/money
+Level 4 1.3x Multiplier on points/money
+Level 5 1.4x Multiplier on points/money
+Level 6 1.5x Multiplier on points/money
+Level 7 1.6x Multiplier on points/money
+Level 8 1.7x Multiplier on points/money
+Level 9 1.8x Multiplier on points/money
+Level 10 1.9x Multiplier on points/money
+Level 11 2.0x Multiplier on points/money
+Level 12 2.1x Multiplier on points/money
+Level 13 2.2x Multiplier on points/money
+Level 14 2.3x Multiplier on points/money
+Level 15 2.4x Multiplier on points/money
+Level 16 2.5x Multiplier on points/money
+Level 17 2.6x Multiplier on points/money
+Level 18 2.7x Multiplier on points/money
+Level 19 2.8x Multiplier on points/money
+Level 20 2.9x Multiplier on points/money.
+
+Each Level will get harder to get to. 
+Level 1 = 0 points total but needing only 100 more to level to level 2 for 100 total
+Level 2 = 100 points total but needing only 110 more to level to level 3 for 210 total
+Level 3 = 210 points total but needing only 121 more to level to level 4 for 331 total
+
+and so on to level 20
+where 
+Level 20 = 5639 points total. but only needing 601  to level to max for 6301 total points
+
+
+Families are seperated by family code. 
+
+So if family A is code = 0A75R9GS
+and Family B is code = 18T974HT
+
+Family A and Family B will not see each others stuff. only family A can see Family A. and Family B can see Family B. 
+
+But Family code 3B43DDCB is the admin family. So all recipes will go to that family. No matter what. and ONLY the recipes. so if Family C adds in recipes. They go to Admin Family. If Family T adds in Recipes they go to Admin family. 
+
+
+if we can get all this set up. one at a time. or all together. either way.

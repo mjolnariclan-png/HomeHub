@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HomeHub Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Auth Screen -->
+    <div id="authScreen" class="auth-screen">
+        <div class="auth-box">
+            <div class="logo" style="width:60px;height:60px;font-size:28px;margin:0 auto 16px;">H</div>
+            <h2>HomeHub</h2>
+            <p style="color:var(--text-muted);margin-bottom:24px;">Family Management Made Simple</p>
+
+            <input id="email" class="form-input" placeholder="Email" style="margin-bottom:12px;" />
+            <input id="password" class="form-input" type="password" placeholder="Password" style="margin-bottom:12px;" />
+            
+            <!-- Toggle between Create and Join -->
+            <div style="display:flex;gap:8px;margin-bottom:12px;">
+                <button type="button" id="modeCreate" class="btn btn-primary" style="flex:1;justify-content:center;font-size:0.8rem;" onclick="setSignupMode('create')">Create Family</button>
+                <button type="button" id="modeJoin" class="btn btn-ghost" style="flex:1;justify-content:center;font-size:0.8rem;" onclick="setSignupMode('join')">Join Family</button>
+            </div>
+            
+            <input id="familyName" class="form-input" placeholder="Family Name" style="margin-bottom:16px;" />
+            <input id="familyCode" class="form-input" placeholder="Family Code" style="margin-bottom:16px;display:none;" />
+
+            <div class="auth-buttons">
+                <button class="btn btn-primary" style="flex:1;justify-content:center;" onclick="login()">Login</button>
+                <button class="btn btn-ghost" style="flex:1;justify-content:center;" onclick="signup()">Sign Up</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div class="app-container" style="display:none;">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">H</div>
+                <div class="sidebar-title">Family Hub</div>
+            </div>
+            
+            <nav class="nav-menu">
+                <button class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard')">
+                    <span class="nav-icon">📊</span>
+                    <span>Dashboard</span>
+                </button>
+                <button class="nav-item" data-page="chores" onclick="navigateTo('chores')">
+                    <span class="nav-icon">🧹</span>
+                    <span>Chore List</span>
+                </button>
+                <button class="nav-item" data-page="shopping" onclick="navigateTo('shopping')">
+                    <span class="nav-icon">🛒</span>
+                    <span>Shopping List</span>
+                </button>
+                <button class="nav-item" data-page="todo" onclick="navigateTo('todo')">
+                    <span class="nav-icon">✅</span>
+                    <span>To-Do List</span>
+                </button>
+                <button class="nav-item" data-page="recipes" onclick="navigateTo('recipes')">
+                    <span class="nav-icon">🍳</span>
+                    <span>Recipes</span>
+                </button>
+                <button class="nav-item" data-page="store" onclick="navigateTo('store')">
+                    <span class="nav-icon">🏪</span>
+                    <span>Kid Store</span>
+                </button>
+                <button class="nav-item" data-page="calendar" onclick="navigateTo('calendar')">
+                    <span class="nav-icon">📅</span>
+                    <span>Calendar</span>
+                </button>
+                <button class="nav-item" data-page="leaderboard" onclick="navigateTo('leaderboard')">
+                    <span class="nav-icon">🏆</span>
+                    <span>Leaderboard</span>
+                </button>
+                <button class="nav-item" data-page="messages" onclick="navigateTo('messages')">
+                    <span class="nav-icon">💬</span>
+                    <span>Messaging</span>
+                </button>
+                <button class="nav-item" data-page="budget" onclick="navigateTo('budget')">
+                    <span class="nav-icon">💰</span>
+                    <span>Budget</span>
+                </button>
+                <button class="nav-item" data-page="admin" onclick="navigateTo('admin')">
+                    <span class="nav-icon">⚙️</span>
+                    <span>Admin & Profile</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="user-profile-mini" onclick="navigateTo('admin')">
+                    <div class="avatar" id="userAvatar">U</div>
+                    <div class="user-info">
+                        <div class="user-name" id="userName">User Name</div>
+                        <div class="user-role" id="userRole">Admin</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-header">
+                <div style="display:flex;align-items:center;gap:16px;">
+                    <button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
+                    <h1 class="page-title" id="pageTitle">Dashboard</h1>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-ghost" onclick="refreshData()">🔄 Refresh</button>
+                    <button class="btn btn-primary" id="addBtn" onclick="showAddModal()">+ Add New</button>
+                </div>
+            </header>
+            <div class="content-area" id="contentArea">
+                <!-- Dynamic content loads here -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal Overlay -->
+    <div id="modalOverlay" class="modal-overlay hidden" onclick="closeModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="modalTitle">Add New</h3>
+                <button class="btn btn-ghost" style="padding:4px 8px;" onclick="closeModal()">✕</button>
+            </div>
+            <div id="modalBody">
+                <!-- Form content injected here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
