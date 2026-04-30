@@ -35,6 +35,15 @@ const store = {
 };
 async function sendPushToUsers(title, message, targetUserIds, deepLink = null) {
   try {
+    // Build OneSignal filter array for tag-based targeting
+    const filters = targetUserIds.flatMap((id, index) => {
+      const filter = { field: "tag", key: "user_id", relation: "=", value: id };
+      if (index < targetUserIds.length - 1) {
+        return [filter, { operator: "OR" }];
+      }
+      return [filter];
+    });
+
     await fetch(`${SUPABASE_URL}/functions/v1/push-notification`, {
       method: 'POST',
       headers: {
@@ -44,15 +53,14 @@ async function sendPushToUsers(title, message, targetUserIds, deepLink = null) {
       body: JSON.stringify({
         title,
         message,
-        userIds: targetUserIds, // Array of Supabase user UUIDs
+        filters,
         url: deepLink
       })
-    })
+    });
   } catch (e) {
-    console.error('Push failed:', e)
+    console.error('Push failed:', e);
   }
 }
-
 // ==================== ROOM CONFIGURATION ====================
 const ROOMS = [
     'Bathroom', 'Kitchen', 'Living Room', 'Boys Bedroom', 'Girls Bedroom',
@@ -490,10 +498,15 @@ async function linkOneSignalUser(userId) {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   window.OneSignalDeferred.push(async function(OneSignal) {
     try {
-      await OneSignal.setExternalUserId(userId);
-      console.log('OneSignal linked to user:', userId);
+      // OneSignal v16 uses tags, not external user IDs
+      if (store.user?.family_id) {
+        await OneSignal.User.addTag("family_id", store.user.family_id);
+        console.log('OneSignal tagged with family:', store.user.family_id);
+      }
+      await OneSignal.User.addTag("user_id", userId);
+      console.log('OneSignal tagged with user:', userId);
     } catch (e) {
-      console.warn('OneSignal link failed:', e.message);
+      console.warn('OneSignal tag failed:', e.message);
     }
   });
 }
