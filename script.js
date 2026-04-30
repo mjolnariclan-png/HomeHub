@@ -35,7 +35,6 @@ const store = {
 };
 async function sendPushToUsers(title, message, targetUserIds, deepLink = null) {
   try {
-    // Build OneSignal filter array for tag-based targeting
     const filters = targetUserIds.flatMap((id, index) => {
       const filter = { field: "tag", key: "user_id", relation: "=", value: id };
       if (index < targetUserIds.length - 1) {
@@ -498,7 +497,6 @@ async function linkOneSignalUser(userId) {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   window.OneSignalDeferred.push(async function(OneSignal) {
     try {
-      // OneSignal v16 uses tags, not external user IDs
       if (store.user?.family_id) {
         await OneSignal.User.addTag("family_id", store.user.family_id);
         console.log('OneSignal tagged with family:', store.user.family_id);
@@ -510,7 +508,6 @@ async function linkOneSignalUser(userId) {
     }
   });
 }
-
 function setSignupMode(mode) {
     signupMode = mode;
     const nameInput = document.getElementById('familyName');
