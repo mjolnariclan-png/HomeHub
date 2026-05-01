@@ -3,7 +3,7 @@
   "short_name": "FamHub",
   "start_url": "/HomeHub/",
   "scope": "/HomeHub/",
-  "display": "standalone",
+  "display": "fullscreen",
   "background_color": "#004bfd",
   "theme_color": "#7d0000",
   "icons": [
