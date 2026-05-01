@@ -1,4 +1,4 @@
-// ==================== SUPABASE CLIENT ====================
+
 const SUPABASE_URL = 'https://vikxhiolaoxsmyarrrwm.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZpa3hoaW9sYW94c215YXJycndtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0OTA4OTMsImV4cCI6MjA5MzA2Njg5M30.hOvhm4qBQkE9diNVIFQxYWl8xTtcvyhXtF237yRrqms';
 
@@ -34,51 +34,7 @@ const store = {
     channels: {},
     currentPage: 'login'
 };
-async function sendPushToUsers(title, message, targetUserIds, deepLink = null) {
-  try {
-    // Skip if no targets
-    if (!targetUserIds || targetUserIds.length === 0) {
-      console.log('No target users for push, skipping');
-      return;
-    }
 
-    const filters = targetUserIds.flatMap((id, index) => {
-      const filter = { field: "tag", key: "user_id", relation: "=", value: id };
-      if (index < targetUserIds.length - 1) {
-        return [filter, { operator: "OR" }];
-      }
-      return [filter];
-    });
-
-    const body = {
-      title,
-      message,
-      filters,
-      url: deepLink
-    };
-
-    console.log('Sending push payload:', JSON.stringify(body, null, 2));
-
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/push-notification`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(body)
-    });
-
-    const data = await res.json();
-    console.log('Push response:', res.status, data);
-
-    if (!res.ok) {
-      console.error('Push failed:', data);
-    }
-
-  } catch (e) {
-    console.error('Push failed:', e);
-  }
-}
 // ==================== ROOM CONFIGURATION ====================
 const ROOMS = [
     'Bathroom', 'Kitchen', 'Living Room', 'Boys Bedroom', 'Girls Bedroom',
@@ -503,14 +459,6 @@ async function login(e) {
         // proceed to app
         showApp();
         // Handle deep links from push notifications
-        function handleDeepLink() {
-            const params = new URLSearchParams(window.location.search);
-            const page = params.get('page');
-            if (page && ['dashboard','chores','shopping','todo','recipes','store','calendar','leaderboard','messages','budget','admin'].includes(page)) {
-                // Wait for auth to complete, then navigate
-                setTimeout(() => navigateTo(page), 500);
-            }
-        }
 
 // Call this after bootstrapUser completes
 // Or add to the end of showApp()
@@ -522,22 +470,6 @@ async function login(e) {
     }
 }
 
-async function linkOneSignalUser(userId) {
-  // Wait for OneSignal to be ready (auto-initialized by the script)
-  window.OneSignalDeferred = window.OneSignalDeferred || [];
-  window.OneSignalDeferred.push(async function(OneSignal) {
-    try {
-      if (store.user?.family_id) {
-        await OneSignal.User.addTag("family_id", store.user.family_id);
-        console.log('OneSignal tagged with family:', store.user.family_id);
-      }
-      await OneSignal.User.addTag("user_id", userId);
-      console.log('OneSignal tagged with user:', userId);
-    } catch (e) {
-      console.warn('OneSignal tag failed:', e.message);
-    }
-  });
-}
 function setSignupMode(mode) {
     signupMode = mode;
     const nameInput = document.getElementById('familyName');
@@ -665,7 +597,6 @@ async function bootstrapUser(userId) {
     }
 
     store.user = profile;
-    await linkOneSignalUser(userId);
     store.family = null;
 
     // Load family once (if exists)
@@ -1109,106 +1040,14 @@ async function completeChore(choreId) {
   
   if (error) { alert('Error: ' + error.message); return }
   
-  // Notify parents/admins
-  const parents = store.familyMembers
-    .filter(m => (m.role === 'admin' || m.role === 'parent') && m.id !== store.user.id)
-    .map(m => m.id)
-  
-  if (parents.length > 0) {
-    await sendPushToUsers(
-      '🧹 Chore Completed!',
-      `${store.user.display_name} completed a chore and needs approval.`,
-      parents,
-      `${window.location.origin}?page=chores`
-    )
-  }
+
   
   alert('Chore submitted for approval!')
   await loadChores()
   renderPage('chores')
 }
 
-// When message is sent → notify everyone else in family
-async function sendMessage(text) {
-  const { error } = await supabaseClient.from('messages').insert({
-    family_id: store.user.family_id,
-    sender_id: store.user.id,
-    message: text
-  }).select()
-  
-  if (error) { alert('Error: ' + error.message); return }
-  
-  // Notify other family members
-  const others = store.familyMembers
-    .filter(m => m.id !== store.user.id)
-    .map(m => m.id)
-  
-  if (others.length > 0) {
-    await sendPushToUsers(
-      '💬 New Message',
-      `${store.user.display_name}: ${text.substring(0, 60)}${text.length > 60 ? '...' : ''}`,
-      others,
-      `${window.location.origin}?page=messages`
-    )
-  }
-  
-  document.getElementById('messageInput').value = ''
-  await loadMessages()
-  renderPage('messages')
-}
 
-// When store item is purchased → notify parents
-async function purchaseStoreItem(itemId, price) {
-  if (store.user.balance < price) {
-    alert('Not enough balance!')
-    return
-  }
-  
-  const { error } = await supabaseClient.rpc('purchase_shop_item', {
-    p_user_id: store.user.id,
-    p_item_id: itemId
-  }).select()
-  
-  if (error) { alert('Error: ' + error.message); return }
-  
-  // Find item name
-  const item = store.storeItems.find(i => i.id === itemId)
-  
-  // Notify parents
-  const parents = store.familyMembers
-    .filter(m => (m.role === 'admin' || m.role === 'parent') && m.id !== store.user.id)
-    .map(m => m.id)
-  
-  if (parents.length > 0 && item) {
-    await sendPushToUsers(
-      '🛍️ Store Purchase',
-      `${store.user.display_name} bought ${item.name} for $${price.toFixed(2)}`,
-      parents,
-      `${window.location.origin}?page=store`
-    )
-  }
-  
-  alert('Purchased!')
-  await loadFamilyData()
-  renderPage('store')
-}
-
-// Calendar event added → notify assigned person
-async function addCalendarEvent(title, description, startTime, endTime, eventType, location, assignedTo, recurrence) {
-  // ... existing insert code ...
-  
-  // If assigned to someone specific, notify them
-  if (assignedTo && assignedTo !== store.user.id) {
-    await sendPushToUsers(
-      '📅 New Calendar Event',
-      `${store.user.display_name} added "${title}" for you`,
-      [assignedTo],
-      `${window.location.origin}?page=calendar`
-    )
-  }
-  
-  // ... rest of existing code ...
-}
 async function approveChore(completionId, choreId, userId, points, value) {
     const isAdmin = store.user?.role === 'admin' || store.user?.role === 'adult';
     if (!isAdmin) { alert('Only parents/admins can approve chores.'); return; }
@@ -1401,23 +1240,6 @@ async function purchaseStoreItem(itemId, price) {
   }).select()
   
   if (error) { alert('Error: ' + error.message); return }
-  
-  // Find item name
-  const item = store.storeItems.find(i => i.id === itemId)
-  
-  // Notify parents
-  const parents = store.familyMembers
-    .filter(m => (m.role === 'admin' || m.role === 'parent') && m.id !== store.user.id)
-    .map(m => m.id)
-  
-  if (parents.length > 0 && item) {
-    await sendPushToUsers(
-      '🛍️ Store Purchase',
-      `${store.user.display_name} bought ${item.name} for $${price.toFixed(2)}`,
-      parents,
-      `${window.location.origin}?page=store`
-    )
-  }
   
   alert('Purchased!')
   await loadFamilyData()
