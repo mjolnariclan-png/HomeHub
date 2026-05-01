@@ -1,12 +1,8 @@
-[
-  {
-    "relation": ["delegate_permission/common.handle_all_urls"],
-    "target": {
-      "namespace": "android_app",
-      "package_name": "io.github.mjolnariclan_png.twa",
-      "sha256_cert_fingerprints": [
-        "PASTE_YOUR_SHA256_HERE"
-      ]
-    }
-  }
-]
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "io.github.mjolnariclan_png.twa",
+        "sha256_cert_fingerprints": ["5F:F3:49:95:CC:A6:06:9B:CC:93:B9:28:AD:A0:6C:0D:C3:C8:19:09:56:76:18:12:D3:3C:8E:28:9A:73:43:FC"]
+      }
+    }]
