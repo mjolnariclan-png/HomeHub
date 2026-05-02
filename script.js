@@ -1797,7 +1797,7 @@ function getNextCompletionTime(lastCompleted, recurrence) {
             nextAvailable.setDate(nextAvailable.getDate() + daysUntilSunday);
             nextAvailable.setHours(0, 0, 0, 0);
             // If same day, push to next Sunday
-            if (nextAvailable <= lastLocal) {
+            if (nextAvailable <= lastCST) {
                 nextAvailable.setDate(nextAvailable.getDate() + 7);
             }
             break;
