@@ -2055,6 +2055,12 @@ function renderChores(container) {
                                         ` : `
                                             <button class="btn btn-primary btn-sm" disabled style="opacity:0.4;cursor:not-allowed;">Complete</button>
                                         `}
+                                        ${isAdmin ? `
+                                            <div style="display:flex;gap:4px;margin-left:8px;">
+                                                <button class="btn btn-ghost btn-sm" onclick="showEditChoreModal('${chore.id}')" title="Edit">✏️</button>
+                                                <button class="btn btn-danger btn-sm" onclick="deleteChore('${chore.id}')" title="Delete">🗑️</button>
+                                            </div>
+                                        ` : ''}
                                     </div>
                                 </div>
                             `;
@@ -2178,6 +2184,133 @@ function renderChores(container) {
     html += `</div>`;
     container.innerHTML = html;
     startChoreTimerUpdates();
+}
+
+function showEditChoreModal(choreId) {
+    const chore = store.allFamilyChores.find(c => c.id === choreId);
+    if (!chore) return;
+    
+    const memberOptions = store.familyMembers.map(m => 
+        `<option value="${m.id}" ${(chore.assigned_to?.id || chore.assigned_to) === m.id ? 'selected' : ''}>${m.display_name || m.username}</option>`
+    ).join('');
+    
+    showModal('Edit Chore', `
+        <div class="form-group">
+            <label class="form-label">Title *</label>
+            <input type="text" class="form-input" id="editChoreTitle" value="${chore.title.replace(/"/g, '&quot;')}">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-textarea" id="editChoreDescription">${chore.description || ''}</textarea>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Points</label>
+                <input type="number" class="form-input" id="editChorePoints" value="${chore.points || 0}" min="0">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Value ($)</label>
+                <input type="number" class="form-input" id="editChoreValue" value="${chore.value || 0}" min="0" step="0.01">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Category</label>
+                <select class="form-select" id="editChoreCategory">
+                    <option value="Cleaning" ${chore.category === 'Cleaning' ? 'selected' : ''}>Cleaning</option>
+                    <option value="Organizing" ${chore.category === 'Organizing' ? 'selected' : ''}>Organizing</option>
+                    <option value="Yard Work" ${chore.category === 'Yard Work' ? 'selected' : ''}>Yard Work</option>
+                    <option value="Pet Care" ${chore.category === 'Pet Care' ? 'selected' : ''}>Pet Care</option>
+                    <option value="Kitchen" ${chore.category === 'Kitchen' ? 'selected' : ''}>Kitchen</option>
+                    <option value="Other" ${chore.category === 'Other' ? 'selected' : ''}>Other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Room/Location</label>
+                <select class="form-select" id="editChoreRoom">
+                    ${ROOMS.map(room => `<option value="${room}" ${chore.room === room ? 'selected' : ''}>${room}</option>`).join('')}
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Recurrence</label>
+                <select class="form-select" id="editChoreRecurrence">
+                    <option value="none" ${chore.recurrence === 'none' ? 'selected' : ''}>One Time</option>
+                    <option value="daily" ${chore.recurrence === 'daily' ? 'selected' : ''}>Daily</option>
+                    <option value="weekly" ${chore.recurrence === 'weekly' ? 'selected' : ''}>Weekly</option>
+                    <option value="monthly" ${chore.recurrence === 'monthly' ? 'selected' : ''}>Monthly</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Assigned To</label>
+                <select class="form-select" id="editChoreAssignedTo">
+                    <option value="">Unassigned</option>
+                    ${memberOptions}
+                </select>
+            </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+            <button class="btn btn-primary w-full" onclick="submitEditChore('${choreId}')">Save Changes</button>
+            <button class="btn btn-danger" onclick="deleteChore('${choreId}')">🗑️ Delete</button>
+        </div>
+    `);
+}
+
+async function submitEditChore(choreId) {
+    const title = document.getElementById('editChoreTitle').value.trim();
+    const description = document.getElementById('editChoreDescription').value.trim();
+    const points = parseInt(document.getElementById('editChorePoints').value) || 0;
+    const value = parseFloat(document.getElementById('editChoreValue').value) || 0;
+    const category = document.getElementById('editChoreCategory').value;
+    const room = document.getElementById('editChoreRoom').value;
+    const recurrence = document.getElementById('editChoreRecurrence').value;
+    const assignedTo = document.getElementById('editChoreAssignedTo').value;
+    
+    if (!title) { alert('Title is required'); return; }
+    
+    const { error } = await supabaseClient
+        .from('chores')
+        .update({
+            title,
+            description,
+            points,
+            value,
+            category,
+            room,
+            recurrence: recurrence || 'none',
+            assigned_to: assignedTo || null
+        })
+        .eq('id', choreId);
+    
+    if (error) { alert('Error: ' + error.message); return; }
+    
+    await loadChores();
+    renderPage('chores');
+    closeModal();
+}
+
+async function deleteChore(choreId) {
+    const isAdmin = store.user?.role === 'admin' || store.user?.role === 'parent';
+    if (!isAdmin) { alert('Only parents/admins can delete chores.'); return; }
+    if (!confirm('Delete this chore? This will also remove any pending completions.')) return;
+    
+    // Delete pending completions first (if FK with ON DELETE CASCADE isn't set)
+    await supabaseClient
+        .from('chore_completions')
+        .delete()
+        .eq('chore_id', choreId);
+    
+    const { error } = await supabaseClient
+        .from('chores')
+        .delete()
+        .eq('id', choreId);
+    
+    if (error) { alert('Error: ' + error.message); return; }
+    
+    await loadChores();
+    renderPage('chores');
+    closeModal();
 }
 function buildRoomTabs(roomMap, sectionId) {
     const roomsWithChores = Object.keys(roomMap).filter(r => roomMap[r].length > 0);
@@ -2685,16 +2818,16 @@ function renderCalendar(container) {
                     <div class="card-title">📅 Upcoming Events (Next 30 Days)</div>
                 </div>
                 <div class="list-container">
-                    ${upcomingEvents.length === 0 ? 
-                        '<div class="list-item"><div class="text-center" style="width:100%;color:var(--text-muted);padding:20px;">No upcoming events in the next 30 days</div></div>' :
-                        upcomingEvents.map(event => {
+                                            ${upcomingEvents.map(event => {
                             const color = getUserColorHex(event.assigned_to);
                             const dateStr = formatEventDate(event.start_time, event.event_type);
                             const timeStr = formatEventTime(event.start_time, event.event_type);
+                            const isAdmin = store.user?.role === 'admin' || store.user?.role === 'parent';
+                            const canEdit = isAdmin || event.created_by === store.user?.id || event.assigned_to === store.user?.id;
                             return `
-                                <div class="list-item">
+                                <div class="list-item" style="flex-wrap:wrap;">
                                     <div class="user-badge" style="background:${color};"></div>
-                                    <div class="list-content">
+                                    <div class="list-content" style="flex:1;min-width:0;">
                                         <div class="list-title">${event.title}</div>
                                         <div class="list-meta">
                                             <span>📅 ${dateStr}</span>
@@ -2704,6 +2837,12 @@ function renderCalendar(container) {
                                             <span>👤 ${getUserName(event.assigned_to) || 'Whole Family'}</span>
                                         </div>
                                     </div>
+                                    ${canEdit ? `
+                                        <div style="display:flex;gap:6px;flex-shrink:0;">
+                                            <button class="btn btn-ghost btn-sm" onclick="showEditEventModal('${event.id}')">✏️</button>
+                                            <button class="btn btn-danger btn-sm" onclick="deleteEvent('${event.id}')">🗑️</button>
+                                        </div>
+                                    ` : ''}
                                 </div>
                             `;
                         }).join('')
@@ -2722,7 +2861,6 @@ function changeCalendarMonth(delta) {
 function showDayEvents(year, month, day) {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     
-    // Find events for this specific day (handle timezone correctly)
     const dayEvents = store.calendarEvents.filter(e => {
         const isoMatch = e.start_time.match(/^(\d{4})-(\d{2})-(\d{2})/);
         if (isoMatch) {
@@ -2739,22 +2877,32 @@ function showDayEvents(year, month, day) {
         return;
     }
     
+    const isAdmin = store.user?.role === 'admin' || store.user?.role === 'parent';
+    const canEdit = (e) => isAdmin || e.created_by === store.user?.id || e.assigned_to === store.user?.id;
+    
     showModal(`Events for ${dateStr}`, `
         <div class="list-container" style="margin-bottom:16px;">
             ${dayEvents.map(e => {
                 const timeStr = formatEventTime(e.start_time, e.event_type);
+                const editable = canEdit(e);
                 return `
-                    <div class="list-item">
-                        <div class="list-content">
+                    <div class="list-item" style="flex-wrap:wrap;">
+                        <div class="list-content" style="flex:1;min-width:0;">
                             <div class="list-title">${e.title}</div>
                             <div class="list-meta">
-                                <span>🕐 ${timeStr}</span>
+                                <span>🕐 ${timeStr} CST</span>
                                 <span>🏷️ ${e.event_type}</span>
                                 ${e.location ? `<span>📍 ${e.location}</span>` : ''}
                                 <span>👤 ${getUserName(e.assigned_to) || 'Whole Family'}</span>
                             </div>
                             ${e.description ? `<div style="margin-top:8px;font-size:0.875rem;">${e.description}</div>` : ''}
                         </div>
+                        ${editable ? `
+                            <div style="display:flex;gap:6px;flex-shrink:0;">
+                                <button class="btn btn-ghost btn-sm" onclick="showEditEventModal('${e.id}')">✏️</button>
+                                <button class="btn btn-danger btn-sm" onclick="deleteEvent('${e.id}')">🗑️</button>
+                            </div>
+                        ` : ''}
                     </div>
                 `;
             }).join('')}
@@ -2828,6 +2976,144 @@ function showAddEventModal(prefillDate = null) {
         </div>
         <button class="btn btn-primary w-full" onclick="submitEvent()">Add Event</button>
     `);
+}
+
+function showEditEventModal(eventId) {
+    const event = store.calendarEvents.find(e => e.id === eventId);
+    if (!event) return;
+    
+    const memberOptions = store.familyMembers.map(m => 
+        `<option value="${m.id}" ${event.assigned_to === m.id ? 'selected' : ''}>${m.display_name || m.username}</option>`
+    ).join('');
+    
+    // Convert UTC stored time back to CST for the datetime-local input
+    const toLocalInput = (isoString) => {
+        if (!isoString) return '';
+        const d = new Date(isoString);
+        // Format as YYYY-MM-DDTHH:MM in CST
+        const cstStr = d.toLocaleString('sv-SE', { timeZone: 'America/Chicago' }); // sv-SE gives YYYY-MM-DD HH:MM:SS
+        return cstStr.replace(' ', 'T').slice(0, 16);
+    };
+    
+    showModal('Edit Event', `
+        <div class="form-group">
+            <label class="form-label">Event Title *</label>
+            <input type="text" class="form-input" id="editEventTitle" value="${event.title.replace(/"/g, '&quot;')}">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-textarea" id="editEventDescription">${event.description || ''}</textarea>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Event Type *</label>
+            <select class="form-select" id="editEventType">
+                <option value="event" ${event.event_type === 'event' ? 'selected' : ''}>Event</option>
+                <option value="birthday" ${event.event_type === 'birthday' ? 'selected' : ''}>Birthday</option>
+                <option value="anniversary" ${event.event_type === 'anniversary' ? 'selected' : ''}>Anniversary</option>
+                <option value="appointment" ${event.event_type === 'appointment' ? 'selected' : ''}>Appointment</option>
+                <option value="reminder" ${event.event_type === 'reminder' ? 'selected' : ''}>Reminder</option>
+                <option value="chore" ${event.event_type === 'chore' ? 'selected' : ''}>Chore</option>
+                <option value="work" ${event.event_type === 'work' ? 'selected' : ''}>Work</option>
+            </select>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Start Date & Time *</label>
+                <input type="datetime-local" class="form-input" id="editEventStart" value="${toLocalInput(event.start_time)}">
+            </div>
+            <div class="form-group">
+                <label class="form-label">End Date & Time</label>
+                <input type="datetime-local" class="form-input" id="editEventEnd" value="${toLocalInput(event.end_time)}">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Location</label>
+            <input type="text" class="form-input" id="editEventLocation" value="${(event.location || '').replace(/"/g, '&quot;')}">
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Assigned To</label>
+                <select class="form-select" id="editEventAssignedTo">
+                    <option value="">Whole Family</option>
+                    ${memberOptions}
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Repeat</label>
+                <select class="form-select" id="editEventRecurrence">
+                    <option value="none" ${event.recurrence === 'none' ? 'selected' : ''}>Does not repeat</option>
+                    <option value="daily" ${event.recurrence === 'daily' ? 'selected' : ''}>Daily</option>
+                    <option value="weekly" ${event.recurrence === 'weekly' ? 'selected' : ''}>Weekly</option>
+                    <option value="monthly" ${event.recurrence === 'monthly' ? 'selected' : ''}>Monthly</option>
+                    <option value="yearly" ${event.recurrence === 'yearly' ? 'selected' : ''}>Yearly</option>
+                </select>
+            </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+            <button class="btn btn-primary w-full" onclick="submitEditEvent('${eventId}')">Save Changes</button>
+            <button class="btn btn-danger" onclick="deleteEvent('${eventId}')">🗑️ Delete</button>
+        </div>
+    `);
+}
+
+async function submitEditEvent(eventId) {
+    const title = document.getElementById('editEventTitle').value.trim();
+    const description = document.getElementById('editEventDescription').value.trim();
+    const eventType = document.getElementById('editEventType').value;
+    const startTime = document.getElementById('editEventStart').value;
+    const endTime = document.getElementById('editEventEnd').value;
+    const location = document.getElementById('editEventLocation').value.trim();
+    const assignedTo = document.getElementById('editEventAssignedTo').value;
+    const recurrence = document.getElementById('editEventRecurrence').value;
+    
+    if (!title || !startTime) { alert('Title and start time are required'); return; }
+    
+    const toUTCString = (dtLocal) => {
+        if (!dtLocal) return null;
+        const [datePart, timePart] = dtLocal.split('T');
+        const [year, month, day] = datePart.split('-').map(Number);
+        const [hour, minute] = timePart.split(':').map(Number);
+        const cstDate = new Date(Date.UTC(year, month - 1, day, hour + 5, minute));
+        return cstDate.toISOString();
+    };
+    
+    const isoStart = toUTCString(startTime);
+    const isoEnd = toUTCString(endTime);
+    
+    const { error } = await supabaseClient
+        .from('calendar_events')
+        .update({
+            title,
+            description,
+            event_type: eventType,
+            start_time: isoStart,
+            end_time: isoEnd,
+            location: location || null,
+            assigned_to: assignedTo || null,
+            recurrence: recurrence || 'none'
+        })
+        .eq('id', eventId);
+    
+    if (error) { alert('Error: ' + error.message); return; }
+    
+    await loadCalendarEvents();
+    renderPage('calendar');
+    closeModal();
+}
+
+async function deleteEvent(eventId) {
+    if (!confirm('Delete this event?')) return;
+    
+    const { error } = await supabaseClient
+        .from('calendar_events')
+        .delete()
+        .eq('id', eventId);
+    
+    if (error) { alert('Error: ' + error.message); return; }
+    
+    await loadCalendarEvents();
+    renderPage('calendar');
+    closeModal();
 }
 
 async function submitEvent() {
