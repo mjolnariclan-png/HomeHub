@@ -534,6 +534,50 @@ body {
     padding: 8px;
     cursor: pointer;
     transition: background 0.2s;
+    overflow: hidden;
+}
+
+/* Mobile portrait: smaller cells */
+@media (max-width: 768px) {
+    .calendar-grid {
+        gap: 0.5px;
+        border-radius: 8px;
+    }
+    
+    .calendar-day {
+        min-height: 48px;
+        padding: 3px 2px;
+    }
+    
+    .calendar-header {
+        padding: 6px 2px;
+        font-size: 0.7rem;
+    }
+    
+    .calendar-day-number {
+        font-size: 0.75rem;
+        margin-bottom: 2px;
+    }
+    
+    .calendar-event {
+        font-size: 0.6rem;
+        padding: 1px 3px;
+        border-radius: 2px;
+    }
+}
+
+@media (max-width: 768px) {
+    .calendar-event {
+        font-size: 0;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        border: none;
+        padding: 0;
+        margin: 1px auto;
+        display: block;
+        background: currentColor !important;
+    }
 }
 
 .calendar-day:hover {

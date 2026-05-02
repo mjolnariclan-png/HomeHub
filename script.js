@@ -356,7 +356,7 @@ function timeAgo(dateString) {
   if (hours < 24) return `${hours}h ago`
   const days = Math.floor(hours / 24)
   if (days < 7) return `${days}d ago`
-  return date.toLocaleDateString()
+  return date.toLocaleDateString('en-US', { timeZone: 'America/Chicago' })
 }
 
 function renderPage(page) {
@@ -1777,14 +1777,11 @@ function getNextCompletionTime(lastCompleted, recurrence) {
     if (!lastCompleted) return null;
     
     const last = new Date(lastCompleted);
+    // Convert UTC to CST (UTC-6 standard, UTC-5 DST)
+    // America/Chicago handles DST automatically
+    const lastCST = new Date(last.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
     
-    // Get user's timezone offset in minutes (positive = behind UTC, negative = ahead)
-    const tzOffsetMin = new Date().getTimezoneOffset();
-    
-    // Convert last completed UTC to local time
-    const lastLocal = new Date(last.getTime() - (tzOffsetMin * 60 * 1000));
-    
-    let nextAvailable = new Date(lastLocal);
+    let nextAvailable = new Date(lastCST);
     
     switch (recurrence) {
         case 'daily': {
@@ -1815,12 +1812,11 @@ function getNextCompletionTime(lastCompleted, recurrence) {
         default:
             return null;
     }
-    
-    // Convert back to UTC for comparison with current time
-    return new Date(nextAvailable.getTime() + (tzOffsetMin * 60 * 1000));
+
+    const offsetMs = nextAvailable.getTime() - lastCST.getTime();
+    return new Date(last.getTime() + offsetMs);
 }
 
-// Format remaining time as readable string
 function formatCountdown(targetDate) {
     if (!targetDate) return 'Ready!';
     
@@ -1843,7 +1839,6 @@ function formatCountdown(targetDate) {
     }
 }
 
-// Check if chore is available to complete
 function isChoreAvailable(chore) {
     if (!chore.last_completed_at) return true;
     if (!chore.recurrence || chore.recurrence === 'none') return true;
@@ -1894,7 +1889,7 @@ function renderChores(container) {
     const isAdmin = store.user?.role === 'admin' || store.user?.role === 'parent';
     const isChild = !isAdmin;
 
-    // Filter chores based on role — BUT keep all in store.chores for admin overview
+
     const myChores = store.chores.filter(c => {
         const assignedId = c.assigned_to?.id || c.assigned_to;
         return assignedId === store.user?.id;
@@ -1904,7 +1899,7 @@ function renderChores(container) {
         return assignedId !== store.user?.id;
     });
 
-    // DEBUG: Log what we have
+
     console.log('=== CHORE DEBUG ===');
     console.log('Total store.chores:', store.chores.length);
     console.log('My chores:', myChores.length);
@@ -1940,7 +1935,6 @@ function renderChores(container) {
         return grouped;
     };
 
-    // Build person tabs HTML with nested room+recurrence grouping
     const buildPersonTabs = (choreMap, sectionId) => {
         const peopleWithChores = Object.keys(choreMap).filter(p => choreMap[p].length > 0);
         if (peopleWithChores.length === 0) {
@@ -1968,14 +1962,10 @@ function renderChores(container) {
         `;
     };
 
-    // Render a person's chores grouped by (recurrence + room)
+
     const renderPersonChoreDetail = (choreList, personName) => {
         if (choreList.length === 0) return '<div class="empty-state-small">No chores for ' + personName + '</div>';
-        
-        // Group by recurrence first, then by room
         const grouped = {};
-        
-        // Initialize structure
         const recurrences = ['daily', 'weekly', 'monthly', 'none'];
         recurrences.forEach(rec => {
             grouped[rec] = {};
@@ -1983,7 +1973,6 @@ function renderChores(container) {
             grouped[rec]['Other'] = [];
         });
         
-        // Sort chores into buckets
         choreList.forEach(chore => {
             const rec = chore.recurrence || 'none';
             const room = chore.room || 'Other';
@@ -1994,7 +1983,6 @@ function renderChores(container) {
             grouped[rec][room].push(chore);
         });
         
-        // Build HTML for each recurrence section
         let html = '';
         
         const recLabels = {
@@ -2114,7 +2102,7 @@ function renderChores(container) {
                                         <span>👤 ${getUserName(pc.completed_by)}</span>
                                         <span>⭐ ${chore?.points || 0} pts</span>
                                         <span>💰 $${(chore?.value || 0).toFixed(2)}</span>
-                                        <span>⏰ ${new Date(pc.created_at).toLocaleDateString()}</span>
+                                        <span>⏰ ${new Date(pc.created_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}</span>
                                     </div>
                                 </div>
                                 <div style="display:flex;gap:8px;">
@@ -2562,34 +2550,34 @@ let calendarCurrentDate = new Date();
 function formatEventDate(startTime, eventType) {
     const date = new Date(startTime);
     const isAllDay = eventType === 'birthday' || eventType === 'anniversary' || 
-                     (date.getUTCHours() === 0 && date.getUTCMinutes() === 0);
+                     (date.getUTCHours() === 5 && date.getUTCMinutes() === 0);
 
     if (isAllDay) {
-        // For all-day events, extract the date parts directly from the ISO string
-        // to avoid timezone shifting the day
         const isoStr = startTime;
         const match = isoStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
         if (match) {
             const [, year, month, day] = match;
             return `${parseInt(month)}/${parseInt(day)}/${year}`;
         }
-        return date.toLocaleDateString();
+        return date.toLocaleDateString('en-US', { timeZone: 'America/Chicago' });
     }
-
-    // For timed events, convert to local time
-    return date.toLocaleDateString();
+    return date.toLocaleDateString('en-US', { timeZone: 'America/Chicago' });
 }
 
 function formatEventTime(startTime, eventType) {
     const date = new Date(startTime);
     const isAllDay = eventType === 'birthday' || eventType === 'anniversary' || 
-                     (date.getUTCHours() === 0 && date.getUTCMinutes() === 0);
+                     (date.getUTCHours() === 5 && date.getUTCMinutes() === 0);
 
     if (isAllDay) {
         return 'All Day';
     }
 
-    return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    return date.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'America/Chicago'
+    });
 }
 
 function renderCalendar(container) {
@@ -2647,7 +2635,7 @@ function renderCalendar(container) {
                 <div class="calendar-day-number">${day}</div>
                 ${dayEvents.map(e => {
                     const color = getUserColorHex(e.assigned_to);
-                    return `<div class="calendar-event" style="background:${color}33;color:${color};border-left:2px solid ${color};">${e.title}</div>`;
+                    return `<div class="calendar-event" style="background:${color}33;color:${color};border-left:2px solid ${color};" title="${e.title}">${e.title}</div>`;
                 }).join('')}
             </div>
         `;
@@ -2710,7 +2698,7 @@ function renderCalendar(container) {
                                         <div class="list-title">${event.title}</div>
                                         <div class="list-meta">
                                             <span>📅 ${dateStr}</span>
-                                            <span>🕐 ${timeStr}</span>
+                                            <span>🕐 ${timeStr} CST</span>
                                             <span>🏷️ ${event.event_type || 'Event'}</span>
                                             ${event.location ? `<span>📍 ${event.location}</span>` : ''}
                                             <span>👤 ${getUserName(event.assigned_to) || 'Whole Family'}</span>
@@ -2857,14 +2845,21 @@ async function submitEvent() {
     // Convert datetime-local (no timezone) to proper ISO 8601 with UTC timezone
     // datetime-local format: "2026-06-18T09:00"
     // We need: "2026-06-18T09:00:00Z" for Supabase timestamptz
-    const toISOString = (dtLocal) => {
+        const toUTCString = (dtLocal) => {
         if (!dtLocal) return null;
-        // Append :00 seconds and Z to make it valid ISO 8601 UTC
-        return dtLocal + ':00Z';
+        // dtLocal is "2026-05-01T14:30" (CST local time, no timezone)
+        // Parse as CST, then convert to UTC ISO string
+        const [datePart, timePart] = dtLocal.split('T');
+        const [year, month, day] = datePart.split('-').map(Number);
+        const [hour, minute] = timePart.split(':').map(Number);
+        // Create date in CST (UTC-5 standard, UTC-6 DST)
+        // Use America/Chicago timezone
+        const cstDate = new Date(Date.UTC(year, month - 1, day, hour + 5, minute));
+        return cstDate.toISOString();
     };
     
-    const isoStart = toISOString(startTime);
-    const isoEnd = toISOString(endTime);
+    const isoStart = toUTCString(startTime);
+    const isoEnd = toUTCString(endTime);
     
     const success = await addCalendarEvent(title, description, isoStart, isoEnd, eventType, location || null, assignedTo || null, recurrence || 'none');
     if (success) closeModal();
@@ -3021,7 +3016,7 @@ function renderBudget(container) {
                                             ${isIncome ? '+' : '-'}$${parseFloat(entry.amount).toFixed(2)}
                                         </span>
                                         <span>🏷️ ${entry.category || 'Uncategorized'}</span>
-                                        ${entry.due_date ? `<span>📅 ${new Date(entry.due_date).toLocaleDateString()}</span>` : ''}
+                                        ${entry.due_date ? `<span>📅 ${new Date(entry.due_date).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}</span>` : ''}
                                         ${entry.is_recurring ? '<span>🔄 Recurring</span>' : ''}
                                     </div>
                                 </div>
@@ -3044,7 +3039,7 @@ function renderBudget(container) {
                                     <span style="color:${t.amount > 0 ? 'var(--success)' : 'var(--danger)'};">
                                         ${t.amount > 0 ? '+' : ''}$${parseFloat(t.amount).toFixed(2)}
                                     </span>
-                                    <span>📅 ${new Date(t.created_at).toLocaleDateString()}</span>
+                                    <span>📅 ${new Date(t.created_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}</span>
                                 </div>
                             </div>
                         </div>
