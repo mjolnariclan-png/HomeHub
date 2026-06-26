@@ -60,6 +60,12 @@ function setSignupMode(mode) {
     }
 }
 
+
+// ==================== TABLET MODE ====================
+function isTabletMode() {
+    return store.user?.username === 'TabletAdmin' || store.user?.email === 'charactercreation9@gmail.com';
+}
+
 function getUserColor(userId) {
     // Handle Supabase joined object: { id, display_name, username }
     if (userId && typeof userId === 'object') {
@@ -1030,21 +1036,100 @@ async function addChore(title, description, value, points, category, room, recur
     return true;
 }
 
-// When chore is completed → notify parents
 async function completeChore(choreId) {
-  const { data, error } = await supabaseClient.from('chore_completions').insert({
-    chore_id: choreId,
-    completed_by: store.user.id,
-    status: 'pending'
-  }).select()
-  
-  if (error) { alert('Error: ' + error.message); return }
-  
-
-  
-  alert('Chore submitted for approval!')
-  await loadChores()
-  renderPage('chores')
+    // TABLET MODE: Skip approval, just mark done and award immediately
+    if (isTabletMode()) {
+        // Show a simple name picker
+        const memberNames = store.familyMembers.map(m => 
+            `${m.id}:${m.display_name || m.username}`
+        ).join(',');
+        
+        const selectedId = prompt(
+            `Who completed this chore?\n\n${store.familyMembers.map(m => `• ${m.display_name || m.username}`).join('\n')}\n\nType the exact name:`
+        );
+        
+        if (!selectedId) return; // cancelled
+        
+        const member = store.familyMembers.find(m => 
+            (m.display_name || m.username).toLowerCase() === selectedId.trim().toLowerCase()
+        );
+        
+        if (!member) {
+            alert('Name not found. Please type the exact name shown.');
+            return;
+        }
+        
+        const chore = store.chores.find(c => c.id === choreId) || store.allFamilyChores.find(c => c.id === choreId);
+        if (!chore) return;
+        
+        // Award points/money immediately with level multiplier
+        const level = member.level || 1;
+        const multiplier = parseFloat(getLevelMultiplier(level));
+        const finalPoints = Math.round((chore.points || 0) * multiplier);
+        const finalValue = parseFloat((chore.value || 0) * multiplier);
+        
+        const newPoints = (member.points || 0) + finalPoints;
+        const newBalance = (member.balance || 0) + finalValue;
+        const newLevel = getLevelFromPoints(newPoints);
+        
+        // Update member profile
+        const { error: profileError } = await supabaseClient
+            .from('profiles')
+            .update({
+                points: newPoints,
+                balance: newBalance,
+                level: newLevel
+            })
+            .eq('id', member.id);
+        
+        if (profileError) {
+            alert('Error awarding points: ' + profileError.message);
+            return;
+        }
+        
+        // Update chore last_completed_at so cooldown starts
+        await supabaseClient
+            .from('chores')
+            .update({ last_completed_at: new Date().toISOString() })
+            .eq('id', choreId);
+        
+        // Optional: Log it for tracking
+        await supabaseClient.from('chore_completions').insert({
+            chore_id: choreId,
+            completed_by: member.id,
+            status: 'approved', // auto-approved
+            approved_by: store.user.id,
+            approved_at: new Date().toISOString()
+        });
+        
+        // Refresh and show
+        await loadFamilyData();
+        renderPage('chores');
+        
+        // Toast instead of alert
+        showToast({
+            icon: '✅',
+            title: 'Chore Completed!',
+            body: `${member.display_name || member.username} earned ${finalPoints} pts and $${finalValue.toFixed(2)}`,
+            type: 'chore',
+            deepLink: 'chores'
+        });
+        
+        return;
+    }
+    
+    // NORMAL MODE: Original approval flow
+    const { data, error } = await supabaseClient.from('chore_completions').insert({
+        chore_id: choreId,
+        completed_by: store.user.id,
+        status: 'pending'
+    }).select();
+    
+    if (error) { alert('Error: ' + error.message); return; }
+    
+    alert('Chore submitted for approval!');
+    await loadChores();
+    renderPage('chores');
 }
 
 
@@ -2043,11 +2128,11 @@ function renderChores(container) {
                                         ${isOneTimeDone ? `<div style="font-size:0.75rem;color:var(--success);margin-top:4px;">✅ Completed</div>` : ''}
                                     </div>
                                     <div class="chore-actions">
-                                        ${isPending ? `
-                                            <span style="font-size:0.75rem;color:var(--warning);font-weight:600;">⏳ Pending Approval</span>
-                                        ` : available ? `
-                                            <button class="btn btn-primary btn-sm" onclick="completeChore('${chore.id}')">Complete</button>
-                                        ` : isOnCooldown ? `
+                                        ${isPending && !isTabletMode() ? `
+                                                <span style="font-size:0.75rem;color:var(--warning);font-weight:600;">⏳ Pending Approval</span>
+                                            ` : (available || isTabletMode()) ? `
+                                                <button class="btn btn-primary btn-sm" onclick="completeChore('${chore.id}')">Complete</button>
+                                            ` : isOnCooldown && isTabletMode() ? `
                                             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
                                                 <button class="btn btn-primary btn-sm" disabled style="opacity:0.4;cursor:not-allowed;">Complete</button>
                                                 <div class="chore-timer" id="timer-btn-${chore.id}">⏳ ${timerText}</div>
@@ -2089,7 +2174,7 @@ function renderChores(container) {
     }
 
     // Pending Approvals (admins only, at top)
-    if (isAdmin && store.pendingCompletions?.length > 0) {
+    if (isAdmin && !isTabletMode() && store.pendingCompletions?.length > 0) {
         html += `
             <div class="card" style="margin-bottom:16px;border:2px solid var(--warning);">
                 <div class="card-header">
