@@ -1871,8 +1871,12 @@ function getNextCompletionTime(lastCompleted, recurrence) {
     switch (recurrence) {
         case 'daily': {
             // Next day at midnight local time
-            nextAvailable.setDate(nextAvailable.getDate() + 1);
-            nextAvailable.setHours(0, 0, 0, 0);
+            nextAvailable.setHours(nextAvailable.getHours() + 24);
+            break;
+        }
+        case 'every_3_days': {
+            // 3 days later at midnight local time
+            nextAvailable.setHours(nextAvailable.getHours() + 72);
             break;
         }
         case 'weekly': {
@@ -1881,16 +1885,39 @@ function getNextCompletionTime(lastCompleted, recurrence) {
             const daysUntilSunday = (7 - dayOfWeek) % 7;
             nextAvailable.setDate(nextAvailable.getDate() + daysUntilSunday);
             nextAvailable.setHours(0, 0, 0, 0);
-            // If same day, push to next Sunday
             if (nextAvailable <= lastCST) {
                 nextAvailable.setDate(nextAvailable.getDate() + 7);
             }
             break;
         }
+        case 'bi_weekly': {
+            const dayofWeek = nextAvailable.getDay();
+            const daysUntilSunday = (7 - dayOfWeek) % 7;
+            nextAvailable.setDate(nextAvailable.getDate() + daysUntilSunday);
+            nextAvailable.setHours(0, 0, 0, 0);
+            if (nextAvailable <= lastCST) {
+                nextAvailable.setDate(nextAvailable.getDate() + 7);
+            }
+            nextAvailable.setDate(nextAvailable.getDate() + 7);
+            break;
+        }
         case 'monthly': {
             // 1st of next month at midnight local time
+            const currentDay = nextAvailable.getDate();
             nextAvailable.setMonth(nextAvailable.getMonth() + 1);
-            nextAvailable.setDate(1);
+            if (nextAvailable.getDate() !== currentDay) {
+                nextAvailable.setDate(0);
+            }
+            nextAvailable.setHours(0, 0, 0, 0);
+            break;
+        }
+        case 'quarterly': {
+            // Every 3 months, same day (clamped)
+            const currentDay = nextAvailable.getDate();
+            nextAvailable.setMonth(nextAvailable.getMonth() + 3);
+            if (nextAvailable.getDate() !== currentDay) {
+                nextAvailable.setDate(0);
+            }
             nextAvailable.setHours(0, 0, 0, 0);
             break;
         }
@@ -1898,9 +1925,9 @@ function getNextCompletionTime(lastCompleted, recurrence) {
             return null;
     }
 
-    const offsetMs = nextAvailable.getTime() - lastCST.getTime();
-    return new Date(last.getTime() + offsetMs);
-}
+        const offsetMs = nextAvailable.getTime() - lastCST.getTime();
+        return new Date(last.getTime() + offsetMs);
+    }
 
 function formatCountdown(targetDate) {
     if (!targetDate) return 'Ready!';
@@ -2071,9 +2098,12 @@ function renderChores(container) {
         let html = '';
         
         const recLabels = {
-            daily: '📅 Daily',
-            weekly: '📆 Weekly', 
+            daily: '📅 Daily (24h)',
+            every_3_days: '📅 Every 3 Days',
+            weekly: '📆 Weekly (Sun)',
+            bi_weekly: '📆 Bi-Weekly',
             monthly: '🗓️ Monthly',
+            quarterly: '🗓️ Quarterly',
             none: '📋 One Time'
         };
         
@@ -2322,9 +2352,12 @@ function showEditChoreModal(choreId) {
                 <label class="form-label">Recurrence</label>
                 <select class="form-select" id="editChoreRecurrence">
                     <option value="none" ${chore.recurrence === 'none' ? 'selected' : ''}>One Time</option>
-                    <option value="daily" ${chore.recurrence === 'daily' ? 'selected' : ''}>Daily</option>
-                    <option value="weekly" ${chore.recurrence === 'weekly' ? 'selected' : ''}>Weekly</option>
+                    <option value="daily" ${chore.recurrence === 'daily' ? 'selected' : ''}>Daily (Every 24 Hours)</option>
+                    <option value="every_3_days" ${chore.recurrence === 'every_3_days' ? 'selected' : ''}>Every 3 Days (72 Hours)</option>
+                    <option value="weekly" ${chore.recurrence === 'weekly' ? 'selected' : ''}>Weekly (Every Sunday)</option>
+                    <option value="bi_weekly" ${chore.recurrence === 'bi_weekly' ? 'selected' : ''}>Bi-Weekly (Every 2 Sundays)</option>
                     <option value="monthly" ${chore.recurrence === 'monthly' ? 'selected' : ''}>Monthly</option>
+                    <option value="quarterly" ${chore.recurrence === 'quarterly' ? 'selected' : ''}>Quarterly (Every 3 Months)</option>
                 </select>
             </div>
             <div class="form-group">
@@ -2565,12 +2598,15 @@ function showAddChoreModal() {
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label class="form-label">Recurrence</label>
+            <label class="form-label">Recurrence</label>
                 <select class="form-select" id="choreRecurrence">
                     <option value="none">One Time</option>
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
+                    <option value="daily">Daily (Every 24 Hours)</option>
+                    <option value="every_3_days">Every 3 Days (72 Hours)</option>
+                    <option value="weekly">Weekly (Every Sunday)</option>
+                    <option value="bi_weekly">Bi-Weekly (Every 2 Sundays)</option>
                     <option value="monthly">Monthly</option>
+                    <option value="quarterly">Quarterly (Every 3 Months)</option>
                 </select>
             </div>
             <div class="form-group">
