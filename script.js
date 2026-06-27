@@ -24,7 +24,6 @@ const store = {
     recipes: [],
     calendarEvents: [],
     leaderboard: [],
-    messages: [],
     budgetEntries: [],
     transactions: [],
     notifications: [],
@@ -135,7 +134,6 @@ function navigateTo(page) {
         store: 'Kid Store',
         calendar: 'Calendar',
         leaderboard: 'Leaderboard',
-        messages: 'Messaging',
         budget: 'Budget',
         admin: 'Admin & Profile'
     };
@@ -143,7 +141,7 @@ function navigateTo(page) {
     
     // Show/hide add button per page
     const addBtn = document.getElementById('addBtn');
-    const noAddPages = ['dashboard', 'leaderboard', 'messages', 'admin'];
+    const noAddPages = ['dashboard', 'leaderboard', 'admin'];
     addBtn.style.display = noAddPages.includes(page) ? 'none' : 'inline-flex';
     
     renderPage(page);
@@ -163,7 +161,6 @@ store.notifications = []
 function setupNotificationSubscriptions() {
   const tables = [
     { table: 'chore_completions', type: 'chore', icon: '🧹', title: 'Chore Completed' },
-    { table: 'messages', type: 'message', icon: '💬', title: 'New Message' },
     { table: 'transactions', type: 'store', icon: '🛍️', title: 'Store Purchase' },
     { table: 'calendar_events', type: 'calendar', icon: '📅', title: 'Calendar Update' },
     { table: 'budget_entries', type: 'budget', icon: '💰', title: 'Budget Update' }
@@ -189,11 +186,6 @@ function setupNotificationSubscriptions() {
           case 'chore':
             body = 'Someone completed a chore and needs approval'
             deepLink = 'chores'
-            break
-          case 'message':
-            body = payload.new.message?.substring(0, 60) || 'New message'
-            if (payload.new.message?.length > 60) body += '...'
-            deepLink = 'messages'
             break
           case 'store':
             body = `A store purchase was made`
@@ -378,7 +370,6 @@ function renderPage(page) {
         case 'store': renderStore(container); break;
         case 'calendar': renderCalendar(container); break;
         case 'leaderboard': renderLeaderboard(container); break;
-        case 'messages': renderMessages(container); break;
         case 'budget': renderBudget(container); break;
         case 'admin': renderAdmin(container); break;
         default: renderDashboard(container);
@@ -716,7 +707,6 @@ async function loadFamilyData() {
         loadTodos(),
         loadRecipes(),
         loadCalendarEvents(),
-        loadMessages(),
         loadBudget(),
         loadLeaderboard(),
         loadStoreItems()
@@ -838,18 +828,6 @@ async function loadCalendarEvents() {
     store.calendarEvents = data || [];
 }
 
-async function loadMessages() {
-    const { data, error } = await supabaseClient
-        .from('messages')
-        .select(`*, sender:profiles(id, display_name, username, avatar_url)`)
-        .eq('family_id', store.user.family_id)
-        .order('created_at', { ascending: true })
-        .limit(100);
-    
-    if (error) { console.error('Error loading messages:', error); return; }
-    store.messages = data || [];
-}
-
 async function loadBudget() {
     const { data: entries } = await supabaseClient
         .from('budget_entries')
@@ -900,7 +878,7 @@ function setupRealtimeSubscriptions() {
     const familyId = store.user.family_id;
     const tables = [
         'chores', 'shopping_list', 'todos', 'recipes',
-        'calendar_events', 'messages', 'budget_entries', 'shop_items'
+        'calendar_events', 'budget_entries', 'shop_items'
     ];
     
     // Unsubscribe and remove any existing channels first
@@ -935,7 +913,6 @@ function handleRealtimeUpdate(table) {
         case 'todos': loadTodos().then(() => { if (store.currentPage === 'todo') renderPage('todo'); }); break;
         case 'recipes': loadRecipes().then(() => { if (store.currentPage === 'recipes') renderPage('recipes'); }); break;
         case 'calendar_events': loadCalendarEvents().then(() => { if (store.currentPage === 'calendar') renderPage('calendar'); }); break;
-        case 'messages': loadMessages().then(() => { if (store.currentPage === 'messages') renderPage('messages'); }); break;
         case 'budget_entries': loadBudget().then(() => { if (store.currentPage === 'budget') renderPage('budget'); }); break;
         case 'shop_items': loadStoreItems().then(() => { if (store.currentPage === 'store') renderPage('store'); }); break;
     }
@@ -1253,34 +1230,6 @@ async function addCalendarEvent(title, description, startTime, endTime, eventTyp
     await loadCalendarEvents();
     renderPage('calendar');
     return true;
-}
-
-async function sendMessage(text) {
-  const { error } = await supabaseClient.from('messages').insert({
-    family_id: store.user.family_id,
-    sender_id: store.user.id,
-    message: text
-  }).select()
-  
-  if (error) { alert('Error: ' + error.message); return }
-  
-  // Notify other family members
-  const others = store.familyMembers
-    .filter(m => m.id !== store.user.id)
-    .map(m => m.id)
-  
-  if (others.length > 0) {
-    await sendPushToUsers(
-      '💬 New Message',
-      `${store.user.display_name}: ${text.substring(0, 60)}${text.length > 60 ? '...' : ''}`,
-      others,
-      `${window.location.origin}?page=messages`
-    )
-  }
-  
-  document.getElementById('messageInput').value = ''
-  await loadMessages()
-  renderPage('messages')
 }
 
 async function addBudgetEntry(title, amount, entryType, category, dueDate, isRecurring, recurrenceType) {
@@ -3271,67 +3220,7 @@ async function submitEvent() {
     const success = await addCalendarEvent(title, description, isoStart, isoEnd, eventType, location || null, assignedTo || null, recurrence || 'none');
     if (success) closeModal();
 }
-// ==================== RENDER: MESSAGES ====================
-function renderMessages(container) {
-    container.innerHTML = `
-        <div class="fade-in" style="height:100%;">
-            <div class="chat-container" id="chatContainer">
-                <div class="chat-sidebar">
-                    <div style="padding:16px;border-bottom:1px solid var(--surface-light);">
-                        <div class="card-title">👥 Family Members</div>
-                    </div>
-                    ${store.familyMembers.map(m => `
-                        <div style="padding:12px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--surface-light);">
-                            <div class="avatar" style="background:${getUserColorHex(m.id)};width:32px;height:32px;font-size:0.75rem;">
-                                ${(m.display_name || m.username).substring(0, 2).toUpperCase()}
-                            </div>
-                            <div>
-                                <div style="font-weight:500;font-size:0.875rem;">${m.display_name || m.username}</div>
-                                <div style="font-size:0.75rem;color:var(--text-muted);text-transform:capitalize;">${m.role}</div>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-                <div class="chat-main">
-                    <div class="chat-messages" id="chatMessages">
-                        ${store.messages.map(msg => {
-                            const isMe = msg.sender_id === store.user.id;
-                            const color = getUserColorHex(msg.sender_id);
-                            return `
-                                <div class="message ${isMe ? 'sent' : 'received'}">
-                                    <div style="font-size:0.75rem;font-weight:600;margin-bottom:4px;${isMe ? 'color:rgba(255,255,255,0.8);' : 'color:' + color + ';'}">
-                                        ${isMe ? 'You' : (msg.sender?.display_name || msg.sender?.username || 'Unknown')}
-                                    </div>
-                                    <div>${msg.message}</div>
-                                    <div class="message-time">${new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                    <div style="padding:16px;border-top:1px solid var(--surface-light);display:flex;gap:8px;">
-                        <input type="text" class="form-input" id="messageInput" placeholder="Type a message..." style="flex:1;" 
-                               onkeypress="if(event.key==='Enter') submitMessage()">
-                        <button class="btn btn-primary" onclick="submitMessage()">Send</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    // Scroll to bottom
-    setTimeout(() => {
-        const chatMessages = document.getElementById('chatMessages');
-        if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
-    }, 100);
-}
 
-async function submitMessage() {
-    const input = document.getElementById('messageInput');
-    const text = input.value.trim();
-    if (!text) return;
-    
-    await sendMessage(text);
-}
 
 // ==================== RENDER: LEADERBOARD ====================
 function renderLeaderboard(container) {
