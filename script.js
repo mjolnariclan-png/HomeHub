@@ -1344,32 +1344,32 @@ function renderDashboard(container) {
     container.innerHTML = `
         <div class="fade-in">
             <div class="dashboard-grid">
-                <div class="card">
+                <div class="card dashboard-card-btn" onclick="navigateTo('leaderboard')">
                     <div class="card-title" style="color:var(--primary);">⭐ Points</div>
                     <div class="stat-value" style="color:var(--primary);">${store.user?.points || 0}</div>
                     <div class="stat-label">Your total points</div>
                 </div>
-                <div class="card">
+                <div class="card dashboard-card-btn" onclick="navigateTo('store')">
                     <div class="card-title" style="color:var(--success);">💰 Balance</div>
                     <div class="stat-value" style="color:var(--success);">$${(store.user?.balance || 0).toFixed(2)}</div>
                     <div class="stat-label">Your chore earnings</div>
                 </div>
-                <div class="card">
+                <div class="card dashboard-card-btn" onclick="navigateTo('leaderboard')">
                     <div class="card-title" style="color:var(--warning);">🏆 Level ${store.user?.level || 1}</div>
                     <div class="stat-value" style="color:var(--warning);">${getLevelMultiplier(store.user?.level || 1)}x</div>
                     <div class="stat-label">Point & money multiplier</div>
                 </div>
-                <div class="card">
+                <div class="card dashboard-card-btn" onclick="navigateTo('todo')">
                     <div class="card-title" style="color:var(--secondary);">📋 To-Dos</div>
                     <div class="stat-value" style="color:var(--secondary);">${store.todos.length}</div>
                     <div class="stat-label">Pending tasks</div>
                 </div>
-                <div class="card">
+                <div class="card dashboard-card-btn" onclick="navigateTo('chores')">
                     <div class="card-title" style="color:var(--danger);">🧹 Chores</div>
                     <div class="stat-value" style="color:var(--danger);">${store.chores.length}</div>
                     <div class="stat-label">Available chores</div>
                 </div>
-                <div class="card">
+                <div class="card dashboard-card-btn" onclick="navigateTo('budget')">
                     <div class="card-title" style="color:var(--text-muted);">💵 Budget</div>
                     <div class="stat-value" style="color:${balance >= 0 ? 'var(--success)' : 'var(--danger)'};">$${balance.toFixed(2)}</div>
                     <div class="stat-label">Monthly balance</div>
@@ -3275,7 +3275,7 @@ async function submitEvent() {
 function renderMessages(container) {
     container.innerHTML = `
         <div class="fade-in" style="height:100%;">
-            <div class="chat-container">
+            <div class="chat-container" id="chatContainer">
                 <div class="chat-sidebar">
                     <div style="padding:16px;border-bottom:1px solid var(--surface-light);">
                         <div class="card-title">👥 Family Members</div>
@@ -3601,7 +3601,7 @@ function renderAdmin(container) {
     
     container.innerHTML = `
         <div class="fade-in">
-            <div class="dashboard-grid" style="grid-template-columns:repeat(auto-fill, minmax(350px, 1fr));">
+            <div class="dashboard-grid" style="grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));">
                 <!-- Profile Card -->
                 <div class="card">
                     <div class="card-header">
