@@ -22,6 +22,7 @@ const store = {
     shoppingList: [],
     todos: [],
     recipes: [],
+    sharedIngredients: [],
     calendarEvents: [],
     leaderboard: [],
     budgetEntries: [],
@@ -710,7 +711,8 @@ async function loadFamilyData() {
         loadCalendarEvents(),
         loadBudget(),
         loadLeaderboard(),
-        loadStoreItems()
+        loadStoreItems(),
+        loadSharedIngredients()
     ]);
 }
 
@@ -811,6 +813,204 @@ async function loadRecipes() {
     store.recipes = data || [];
 }
 
+function showImportRecipeModal() {
+    showModal('Import Recipe from Text', `
+        <div class="form-group">
+            <label class="form-label">Recipe Name *</label>
+            <input type="text" class="form-input" id="importRecipeName" placeholder="e.g., Garlic Steak Bites">
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Food Type</label>
+                <select class="form-select" id="importRecipeFoodType">
+                    <option value="Drink">Drink</option>
+                    <option value="Appetizer">Appetizer</option>
+                    <option value="Entree" selected>Entree</option>
+                    <option value="Snack">Snack</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Servings</label>
+                <input type="number" class="form-input" id="importRecipeServings" value="4" min="1">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Prep Time (mins)</label>
+                <input type="number" class="form-input" id="importRecipePrepTime" value="0" min="0">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Cook Time (mins)</label>
+                <input type="number" class="form-input" id="importRecipeCookTime" value="0" min="0">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Difficulty</label>
+            <select class="form-select" id="importRecipeDifficulty">
+                <option value="Easy">Easy</option>
+                <option value="Medium" selected>Medium</option>
+                <option value="Hard">Hard</option>
+            </select>
+        </div>
+        
+        <div style="margin:16px 0;border-top:1px solid var(--surface-light);padding-top:16px;">
+            <div class="form-group">
+                <label class="form-label">Paste Ingredients <span style="font-weight:400;color:var(--text-muted);">(one per line)</span></label>
+                <textarea class="form-textarea" id="importIngredientsText" placeholder="2 clove(s) garlic
+½ small shallot
+Fresh parsley
+2 tbsp. olive oil" style="min-height:120px;"></textarea>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Paste Directions <span style="font-weight:400;color:var(--text-muted);">(numbered or plain text)</span></label>
+                <textarea class="form-textarea" id="importDirectionsText" placeholder="1
+For the sauce, finely chop garlic...
+2
+Pat the steak dry..." style="min-height:150px;"></textarea>
+            </div>
+        </div>
+        
+        <button class="btn btn-primary w-full" onclick="parseAndImportRecipe()">Parse & Import</button>
+    `);
+}
+
+function parseIngredientsFromText(text) {
+    if (!text.trim()) return [];
+    
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const ingredients = [];
+    
+    for (const line of lines) {
+        // Pattern: "2 tbsp. fresh navel orange juice" 
+        // OR "½ small shallot"
+        // OR "Fresh parsley" (no amount)
+        // OR "1 (1- to 1¼ -lb.) Hy-Vee Prime Reserve beef top sirloin steak"
+        
+        // Try to match: [amount] [unit.] [name]
+        // Amount can be: digits, fractions, mixed like "1 ½", "8 (5½-"
+        const match = line.match(/^([\d\s½¼¾⅓⅔⅛⅜⅝⅞.\-()]+)?\s*(tbsp\.?|tsp\.?|c\.?|cup|oz\.?|lb\.?|lbs\.?|g|kg|ml|l|in\.?|inch|clove\(s\)|sprig\(s\)|pkg\.?|package|can|bottle|stick|slice|piece|pinch|dash|bunch|head|ear|fillet|fillet\(s\)|strip|chunk|cube|clove|sprig|leaf|leaves|stalk|stalks|pod|pods|strip|strips|wedge|wedges|round|rounds|fillet|fillets|bone|bones|rib|ribs|thigh|thighs|breast|breasts|wing|wings|leg|legs|drumstick|drumsticks|tenderloin|tenderloins|chop|chops|steak|steaks|roast|roasts|shoulder|shoulders|belly|bellies|butt|butts|ham|hams|bacon|sausage|sausages|link|links|patty|patties|ball|balls|meatball|meatballs|slice|slices|strip|strips|chunk|chunks|piece|pieces|half|halves|quarter|quarters|third|thirds|eighth|eighths|dozen|dozens|pack|packs|box|boxes|bag|bags|jar|jars|bottle|bottles|container|containers|tub|tubs|tub\(s\)|carton|cartons|bunch|bunches|head|heads|clove|cloves|bulb|bulbs|stalk|stalks|spear|spears|pod|pods|ear|ears|kernel|kernels|slice|slices|wedge|wedges|fillet|fillets|steak|steaks|chop|chops|roast|roasts|shoulder|shoulders|belly|bellies|butt|butts|ham|hams|bacon|sausage|sausages|link|links|patty|patties|ball|balls|meatball|meatballs|strip|strips|chunk|chunks|piece|pieces|half|halves|quarter|quarters|third|thirds|eighth|eighths)?\s*(.+)$/i);
+        
+        if (match) {
+            let amount = (match[1] || '').trim();
+            let unit = (match[2] || '').trim();
+            let name = (match[3] || '').trim();
+            
+            // If no unit matched, amount might be part of name
+            if (!unit && amount) {
+                // Check if amount ends with a unit abbreviation
+                const unitCheck = amount.match(/(tbsp|tsp|c|cup|oz|lb|lbs|g|kg|ml|l|in|inch|clove|sprig|pkg|package|can|bottle|stick|slice|piece|pinch|dash|bunch|head|ear|fillet|bone|rib|thigh|breast|wing|leg|drumstick|tenderloin|chop|steak|roast|shoulder|belly|butt|ham|bacon|sausage|link|patty|ball|meatball|strip|chunk|piece|half|quarter|third|eighth|dozen|pack|box|bag|jar|container|tub|carton|bulb|spear|pod|kernel|wedge)\.?$/i);
+                if (unitCheck) {
+                    unit = unitCheck[1];
+                    amount = amount.replace(new RegExp(unit + '\\.?$', 'i'), '').trim();
+                }
+            }
+            
+            const fullAmount = [amount, unit].filter(Boolean).join(' ') || 'as needed';
+            
+            ingredients.push({
+                name: name || line,
+                amount: fullAmount
+            });
+        } else {
+            // Fallback: just use the whole line as name
+            ingredients.push({
+                name: line,
+                amount: 'as needed'
+            });
+        }
+    }
+    
+    return ingredients;
+}
+
+function parseDirectionsFromText(text) {
+    if (!text.trim()) return '';
+    
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const steps = [];
+    let currentStep = '';
+    let stepNum = 1;
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        
+        // Check if line is just a number (step indicator)
+        if (/^\d+$/.test(line)) {
+            if (currentStep) {
+                steps.push(currentStep.trim());
+            }
+            currentStep = '';
+            stepNum = parseInt(line);
+        } else {
+            currentStep += (currentStep ? ' ' : '') + line;
+        }
+    }
+    
+    // Don't forget the last step
+    if (currentStep) {
+        steps.push(currentStep.trim());
+    }
+    
+    // If no numbered steps found, treat each line as a step
+    if (steps.length === 0 && lines.length > 0) {
+        return lines.join('\n\n');
+    }
+    
+    // Reformat with clean numbers
+    return steps.map((step, idx) => `${idx + 1}. ${step}`).join('\n\n');
+}
+
+async function parseAndImportRecipe() {
+    const name = document.getElementById('importRecipeName').value.trim();
+    const foodType = document.getElementById('importRecipeFoodType').value;
+    const servings = parseInt(document.getElementById('importRecipeServings').value) || null;
+    const prepTime = parseInt(document.getElementById('importRecipePrepTime').value) || 0;
+    const cookTime = parseInt(document.getElementById('importRecipeCookTime').value) || 0;
+    const difficulty = document.getElementById('importRecipeDifficulty').value;
+    
+    const ingredientsText = document.getElementById('importIngredientsText').value;
+    const directionsText = document.getElementById('importDirectionsText').value;
+    
+    if (!name) { alert('Recipe name is required'); return; }
+    
+    const ingredients = parseIngredientsFromText(ingredientsText);
+    const instructions = parseDirectionsFromText(directionsText);
+    
+    console.log('Parsed ingredients:', ingredients); // Debug
+    
+    // Add all ingredients to shared list
+    for (const ing of ingredients) {
+        await addSharedIngredient(ing.name);
+    }
+    
+    const { data, error } = await supabaseClient.from('recipes').insert({
+        family_id: store.user.family_id,
+        name,
+        food_type: foodType,
+        description: '',
+        ingredients: JSON.stringify(ingredients),
+        instructions,
+        servings,
+        prep_time: prepTime,
+        cook_time: cookTime,
+        portion_size: null,
+        difficulty,
+        created_by: store.user.id
+    }).select();
+    
+    if (error) { 
+        console.error('Insert error:', error);
+        alert('Error: ' + error.message); 
+        return; 
+    }
+    
+    console.log('Inserted recipe:', data); // Debug
+    
+    await loadRecipes();
+    renderPage('recipes');
+    closeModal();
+}
+
 async function loadCalendarEvents() {
     const year = calendarCurrentDate.getFullYear();
     const month = calendarCurrentDate.getMonth();
@@ -873,6 +1073,40 @@ async function loadStoreItems() {
     
     if (error) { console.error('Error loading store:', error); return; }
     store.storeItems = data || [];
+}
+
+async function loadSharedIngredients() {
+    const { data, error } = await supabaseClient
+        .from('shared_ingredients')
+        .select('*')
+        .eq('family_id', store.user.family_id)
+        .order('name', { ascending: true });
+    
+    if (error) { console.error('Error loading ingredients:', error); return; }
+    store.sharedIngredients = data || [];
+}
+
+async function addSharedIngredient(name) {
+    const cleanName = name.trim().toLowerCase();
+    if (!cleanName) return null;
+    
+    // Check if already exists
+    const exists = store.sharedIngredients.find(i => i.name.toLowerCase() === cleanName);
+    if (exists) return exists.id;
+    
+    const { data, error } = await supabaseClient
+        .from('shared_ingredients')
+        .insert({
+            family_id: store.user.family_id,
+            name: cleanName,
+            created_by: store.user.id
+        })
+        .select();
+    
+    if (error) { console.error('Error adding ingredient:', error); return null; }
+    store.sharedIngredients.push(data[0]);
+    store.sharedIngredients.sort((a, b) => a.name.localeCompare(b.name));
+    return data[0].id;
 }
 
 function setupRealtimeSubscriptions() {
@@ -1228,9 +1462,63 @@ async function addCalendarEvent(title, description, startTime, endTime, eventTyp
         console.error('Calendar insert error details:', error);
         return false; 
     }
+    
+    // If recurring, generate future instances
+    if (recurrence && recurrence !== 'none') {
+        await generateRecurringInstances(data[0], recurrence);
+    }
+    
     await loadCalendarEvents();
     renderPage('calendar');
     return true;
+}
+
+async function generateRecurringInstances(baseEvent, recurrence) {
+    const instances = [];
+    let currentStart = new Date(baseEvent.start_time);
+    let currentEnd = baseEvent.end_time ? new Date(baseEvent.end_time) : null;
+    
+    // Generate 51 more instances (52 total = 1 year of weekly)
+    const count = recurrence === 'daily' ? 30 : recurrence === 'weekly' ? 51 : recurrence === 'monthly' ? 11 : 3;
+    
+    for (let i = 0; i < count; i++) {
+        switch(recurrence) {
+            case 'daily':
+                currentStart.setDate(currentStart.getDate() + 1);
+                if (currentEnd) currentEnd.setDate(currentEnd.getDate() + 1);
+                break;
+            case 'weekly':
+                currentStart.setDate(currentStart.getDate() + 7);
+                if (currentEnd) currentEnd.setDate(currentEnd.getDate() + 7);
+                break;
+            case 'monthly':
+                currentStart.setMonth(currentStart.getMonth() + 1);
+                if (currentEnd) currentEnd.setMonth(currentEnd.getMonth() + 1);
+                break;
+            case 'yearly':
+                currentStart.setFullYear(currentStart.getFullYear() + 1);
+                if (currentEnd) currentEnd.setFullYear(currentEnd.getFullYear() + 1);
+                break;
+        }
+        
+        instances.push({
+            family_id: baseEvent.family_id,
+            title: baseEvent.title,
+            description: baseEvent.description,
+            start_time: currentStart.toISOString(),
+            end_time: currentEnd ? currentEnd.toISOString() : null,
+            event_type: baseEvent.event_type,
+            location: baseEvent.location,
+            assigned_to: baseEvent.assigned_to,
+            recurrence: 'none', // instances are standalone
+            parent_event_id: baseEvent.id,
+            created_by: baseEvent.created_by
+        });
+    }
+    
+    // Batch insert
+    const { error } = await supabaseClient.from('calendar_events').insert(instances);
+    if (error) console.error('Error generating recurring instances:', error);
 }
 
 async function addBudgetEntry(title, amount, entryType, category, dueDate, isRecurring, recurrenceType) {
@@ -2839,6 +3127,7 @@ function renderRecipes(container) {
         <div class="fade-in">
             <div style="display:flex;gap:8px;margin-bottom:20px;">
                 <button class="btn btn-primary" onclick="showAddRecipeModal()">+ Add Recipe</button>
+                <button class="btn btn-ghost" onclick="showImportRecipeModal()">📥 Import Recipe</button>
             </div>
             
             ${renderRecipeSection('🥤 Drinks', drinks)}
@@ -2861,40 +3150,120 @@ function renderRecipeSection(title, recipes) {
             <div class="list-container">
                 ${recipes.map(recipe => {
                     const ingredients = parseIngredients(recipe.ingredients);
+                    const totalTime = (recipe.prep_time || 0) + (recipe.cook_time || 0);
+                    let timeDisplay = '';
+                    if (totalTime > 0) {
+                        if (totalTime >= 60) {
+                            const hrs = Math.floor(totalTime / 60);
+                            const mins = totalTime % 60;
+                            timeDisplay = `${hrs}h${mins > 0 ? ' ' + mins + 'm' : ''}`;
+                        } else {
+                            timeDisplay = `${totalTime}m`;
+                        }
+                    }
+                    
                     return `
-                        <div class="list-item" style="flex-direction:column;align-items:flex-start;">
-                            <div style="display:flex;align-items:center;gap:12px;width:100%;">
-                                <div class="list-content" style="flex:1;">
+                        <div class="recipe-card" id="recipe-card-${recipe.id}">
+                            <!-- HEADER: Always visible, click to expand -->
+                            <div class="recipe-header" onclick="toggleRecipe('${recipe.id}')">
+                                <div class="recipe-header-content">
                                     <div class="list-title">${recipe.name}</div>
                                     <div class="list-meta">
                                         <span>🍳 ${recipe.food_type || 'Uncategorized'}</span>
-                                        ${recipe.description ? `<span>${recipe.description}</span>` : ''}
+                                        ${recipe.difficulty ? `<span>📊 ${recipe.difficulty}</span>` : ''}
+                                        ${recipe.servings ? `<span>👥 Serves ${recipe.servings}</span>` : ''}
+                                        ${timeDisplay ? `<span>⏱️ ${timeDisplay}</span>` : ''}
+                                        ${recipe.portion_size ? `<span>🍽️ ${recipe.portion_size}</span>` : ''}
                                     </div>
                                 </div>
+                                <div class="recipe-chevron" id="chevron-${recipe.id}">▼</div>
                             </div>
-                            ${ingredients.length > 0 ? `
-                                <div style="margin-top:12px;padding:12px;background:var(--bg);border-radius:8px;width:100%;">
-                                    <div style="font-weight:600;margin-bottom:8px;font-size:0.875rem;">Ingredients:</div>
-                                    ${ingredients.map(ing => `
-                                        <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--surface-light);">
-                                            <span>${ing.name}</span>
-                                            <span style="color:var(--text-muted);">${ing.amount}</span>
+                            
+                            <!-- BODY: Hidden by default, expands on click -->
+                            <div class="recipe-body hidden" id="recipe-body-${recipe.id}">
+                                ${ingredients.length > 0 ? `
+                                    <div class="recipe-section">
+                                        <div class="recipe-section-title">Ingredients:</div>
+                                        <div class="recipe-ingredients">
+                                            ${ingredients.map(ing => `
+                                                <div class="recipe-ingredient">
+                                                    <span class="recipe-ing-name">${ing.name}</span>
+                                                    <span class="recipe-ing-amount">${ing.amount}</span>
+                                                </div>
+                                            `).join('')}
                                         </div>
-                                    `).join('')}
+                                    </div>
+                                ` : ''}
+                                
+                                ${recipe.instructions ? `
+                                    <div class="recipe-section">
+                                        <div class="recipe-section-title">Instructions:</div>
+                                        <div class="recipe-instructions">${formatInstructions(recipe.instructions)}</div>
+                                    </div>
+                                ` : ''}
+                                
+                                ${(recipe.prep_time || recipe.cook_time) ? `
+                                    <div class="recipe-section">
+                                        <div class="recipe-time-bar">
+                                            ${recipe.prep_time ? `<span>🔪 Prep: ${recipe.prep_time}m</span>` : ''}
+                                            ${recipe.cook_time ? `<span>🔥 Cook: ${recipe.cook_time}m</span>` : ''}
+                                            ${timeDisplay ? `<span class="recipe-total-time">⏱️ Total: ${timeDisplay}</span>` : ''}
+                                        </div>
+                                    </div>
+                                ` : ''}
+                                
+                                <div class="recipe-actions-bar">
+                                    <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); showEditRecipeModal('${recipe.id}')">✏️ Edit</button>
+                                    <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteRecipe('${recipe.id}')">🗑️ Delete</button>
                                 </div>
-                            ` : ''}
-                            ${recipe.instructions ? `
-                                <div style="margin-top:12px;padding:12px;background:var(--bg);border-radius:8px;width:100%;">
-                                    <div style="font-weight:600;margin-bottom:8px;font-size:0.875rem;">Instructions:</div>
-                                    <div style="white-space:pre-wrap;font-size:0.875rem;">${recipe.instructions}</div>
-                                </div>
-                            ` : ''}
+                            </div>
                         </div>
                     `;
                 }).join('')}
             </div>
         </div>
     `;
+}
+
+function formatInstructions(instructions) {
+    if (!instructions) return '';
+    
+    // If already has numbered steps like "1. Step" or "1\nStep", format nicely
+    const lines = instructions.split('\n').filter(l => l.trim());
+    
+    // Check if it looks like numbered steps
+    const hasNumbers = lines.some(l => /^\d+[\.\)]?\s/.test(l.trim()));
+    
+    if (hasNumbers) {
+        return lines.map(line => {
+            const match = line.match(/^(\d+)[\.\)]?\s*(.*)$/);
+            if (match) {
+                return `<div class="recipe-step"><span class="recipe-step-num">${match[1]}</span><span class="recipe-step-text">${match[2]}</span></div>`;
+            }
+            return `<div class="recipe-step"><span class="recipe-step-num">•</span><span class="recipe-step-text">${line}</span></div>`;
+        }).join('');
+    }
+    
+    // Plain text paragraphs
+    return lines.map(line => `<p style="margin-bottom:12px;">${line}</p>`).join('');
+}
+
+function toggleRecipe(recipeId) {
+    const body = document.getElementById(`recipe-body-${recipeId}`);
+    const chevron = document.getElementById(`chevron-${recipeId}`);
+    
+    if (body.classList.contains('hidden')) {
+        // Expand this one, collapse others
+        document.querySelectorAll('.recipe-body').forEach(b => b.classList.add('hidden'));
+        document.querySelectorAll('.recipe-chevron').forEach(c => c.textContent = '▼');
+        
+        body.classList.remove('hidden');
+        chevron.textContent = '▲';
+    } else {
+        // Collapse
+        body.classList.add('hidden');
+        chevron.textContent = '▼';
+    }
 }
 
 function parseIngredients(ingredientsJson) {
@@ -2907,34 +3276,83 @@ function parseIngredients(ingredientsJson) {
 }
 
 function showAddRecipeModal() {
+    const ingredientOptions = store.sharedIngredients.map(ing => 
+        `<option value="${ing.name}">${ing.name}</option>`
+    ).join('');
+    
     showModal('Add Recipe', `
         <div class="form-group">
             <label class="form-label">Food Name *</label>
             <input type="text" class="form-input" id="recipeName" placeholder="e.g., Tacos">
         </div>
-        <div class="form-group">
-            <label class="form-label">Food Type</label>
-            <select class="form-select" id="recipeFoodType">
-                <option value="Drink">Drink</option>
-                <option value="Appetizer">Appetizer</option>
-                <option value="Entree" selected>Entree</option>
-                <option value="Snack">Snack</option>
-            </select>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Food Type</label>
+                <select class="form-select" id="recipeFoodType">
+                    <option value="Drink">Drink</option>
+                    <option value="Appetizer">Appetizer</option>
+                    <option value="Entree" selected>Entree</option>
+                    <option value="Snack">Snack</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Servings</label>
+                <input type="number" class="form-input" id="recipeServings" value="4" min="1" placeholder="How many?">
+            </div>
         </div>
         <div class="form-group">
             <label class="form-label">Description</label>
             <textarea class="form-textarea" id="recipeDescription" placeholder="Brief description..."></textarea>
         </div>
+        
+        <!-- TIME SECTION -->
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Prep Time (mins)</label>
+                <input type="number" class="form-input" id="recipePrepTime" value="0" min="0" onchange="updateTotalTime()">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Cook Time (mins)</label>
+                <input type="number" class="form-input" id="recipeCookTime" value="0" min="0" onchange="updateTotalTime()">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Total Time: <span id="totalTimeDisplay" style="color:var(--primary);font-weight:700;">0 mins</span></label>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Portion Size</label>
+                <input type="text" class="form-input" id="recipePortion" placeholder="e.g., 1 cup, 2 tacos">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Difficulty</label>
+                <select class="form-select" id="recipeDifficulty">
+                    <option value="Easy">Easy</option>
+                    <option value="Medium" selected>Medium</option>
+                    <option value="Hard">Hard</option>
+                </select>
+            </div>
+        </div>
+        
+        <!-- INGREDIENTS SECTION -->
         <div class="form-group">
             <label class="form-label">Ingredients</label>
-            <div id="ingredientsList">
-                <div class="form-row" style="margin-bottom:8px;">
-                    <input type="text" class="form-input" placeholder="Item name" class="ing-name">
-                    <input type="text" class="form-input" placeholder="Amount" class="ing-amount">
+                        <div id="ingredientsList">
+                <div class="ingredient-row" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                    <select class="form-select ingredient-select" style="flex:2;min-width:0;" onchange="handleIngredientSelect(this)">
+                        <option value="">Select ingredient...</option>
+                        ${ingredientOptions}
+                        <option value="__new__">+ Add new ingredient...</option>
+                    </select>
+                    <input type="text" class="form-input ing-amount" style="flex:1;min-width:0;" placeholder="Amount">
+                    <button type="button" class="btn btn-danger btn-sm" onclick="removeIngredientRow(this)" style="flex-shrink:0;">✕</button>
                 </div>
             </div>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="addIngredientRow()">+ Add Item</button>
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="addIngredientRow()">+ Add Ingredient</button>
         </div>
+        
         <div class="form-group">
             <label class="form-label">Instructions</label>
             <textarea class="form-textarea" id="recipeInstructions" placeholder="Step by step instructions..."></textarea>
@@ -2943,49 +3361,388 @@ function showAddRecipeModal() {
     `);
 }
 
+function updateTotalTime() {
+    const prep = parseInt(document.getElementById('recipePrepTime')?.value) || 0;
+    const cook = parseInt(document.getElementById('recipeCookTime')?.value) || 0;
+    const total = prep + cook;
+    
+    let display = '';
+    if (total >= 60) {
+        const hrs = Math.floor(total / 60);
+        const mins = total % 60;
+        display = `${hrs}h ${mins > 0 ? mins + 'm' : ''}`;
+    } else {
+        display = `${total} mins`;
+    }
+    
+    const el = document.getElementById('totalTimeDisplay');
+    if (el) el.textContent = display;
+}
+
+function handleIngredientSelect(select) {
+    if (select.value === '__new__') {
+        // Pause to let dropdown close
+        setTimeout(() => {
+            const name = prompt('Enter new ingredient name:');
+            if (name && name.trim()) {
+                const cleanName = name.trim();
+                addSharedIngredient(cleanName).then(() => {
+                    // Refresh all ingredient selects
+                    refreshAllIngredientSelects(cleanName);
+                });
+            } else {
+                select.value = '';
+            }
+        }, 10);
+    }
+}
+
+function refreshAllIngredientSelects(selectNewName) {
+    const options = store.sharedIngredients.map(ing => 
+        `<option value="${ing.name}" ${ing.name === selectNewName ? 'selected' : ''}>${ing.name}</option>`
+    ).join('');
+    
+    document.querySelectorAll('.ingredient-select').forEach(sel => {
+        const currentVal = sel.value;
+        sel.innerHTML = `
+            <option value="">Select ingredient...</option>
+            ${options}
+            <option value="__new__">+ Add new ingredient...</option>
+        `;
+        // Restore selection if it still exists
+        if (currentVal && currentVal !== '__new__') {
+            sel.value = currentVal;
+        }
+    });
+}
+
 function addIngredientRow() {
     const list = document.getElementById('ingredientsList');
+    if (!list) return;
+    
+    const options = store.sharedIngredients.map(ing => 
+        `<option value="${ing.name}">${ing.name}</option>`
+    ).join('');
+    
     const row = document.createElement('div');
-    row.className = 'form-row';
-    row.style.marginBottom = '8px';
+    row.className = 'ingredient-row';
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;';
     row.innerHTML = `
-        <input type="text" class="form-input" placeholder="Item name" class="ing-name">
-        <input type="text" class="form-input" placeholder="Amount" class="ing-amount">
+        <select class="form-select ingredient-select" style="flex:2;min-width:0;" onchange="handleIngredientSelect(this)">
+            <option value="">Select ingredient...</option>
+            ${options}
+            <option value="__new__">+ Add new ingredient...</option>
+        </select>
+        <input type="text" class="form-input ing-amount" style="flex:1;min-width:0;" placeholder="Amount">
+        <button type="button" class="btn btn-danger btn-sm" onclick="removeIngredientRow(this)" style="flex-shrink:0;">✕</button>
     `;
     list.appendChild(row);
 }
+
+function removeIngredientRow(btn) {
+    const row = btn.closest('.ingredient-row');
+    if (row) row.remove();
+}
+
+
 
 async function submitRecipe() {
     const name = document.getElementById('recipeName').value.trim();
     const foodType = document.getElementById('recipeFoodType').value;
     const description = document.getElementById('recipeDescription').value.trim();
     const instructions = document.getElementById('recipeInstructions').value.trim();
+    const servings = parseInt(document.getElementById('recipeServings').value) || null;
+    const prepTime = parseInt(document.getElementById('recipePrepTime').value) || 0;
+    const cookTime = parseInt(document.getElementById('recipeCookTime').value) || 0;
+    const portion = document.getElementById('recipePortion').value.trim() || null;
+    const difficulty = document.getElementById('recipeDifficulty').value;
+    
+    if (!name) { alert('Food name is required'); return; }
+    
+    // Collect ingredients from rows
+    const ingredients = [];
+    const rows = document.querySelectorAll('#ingredientsList .ingredient-row');
+    
+    for (const row of rows) {
+        const select = row.querySelector('.ingredient-select');
+        const amountInput = row.querySelector('.ing-amount');
+        const ingName = select?.value;
+        
+        if (ingName && ingName !== '__new__' && ingName !== '') {
+            ingredients.push({
+                name: ingName,
+                amount: amountInput?.value.trim() || '1'
+            });
+            await addSharedIngredient(ingName);
+        }
+    }
+    
+    const { error } = await supabaseClient.from('recipes').insert({
+        family_id: store.user.family_id,
+        name,
+        food_type: foodType,
+        description,
+        ingredients: JSON.stringify(ingredients),
+        instructions,
+        servings,
+        prep_time: prepTime,
+        cook_time: cookTime,
+        portion_size: portion,
+        difficulty,
+        created_by: store.user.id
+    }).select();
+    
+    if (error) { alert('Error: ' + error.message); return false; }
+    
+    await loadRecipes();
+    renderPage('recipes');
+    return true;
+}
+
+function showEditRecipeModal(recipeId) {
+    const recipe = store.recipes.find(r => r.id === recipeId);
+    if (!recipe) return;
+    
+    const ingredients = parseIngredients(recipe.ingredients);
+    const ingredientOptions = store.sharedIngredients.map(ing => 
+        `<option value="${ing.name}">${ing.name}</option>`
+    ).join('');
+    
+    const ingredientRows = ingredients.map(ing => `
+        <div class="form-row" style="margin-bottom:8px;align-items:center;">
+            <select class="form-select ingredient-select" style="flex:2;" onchange="handleIngredientSelect(this)">
+                <option value="">Select ingredient...</option>
+                ${ingredientOptions}
+                <option value="${ing.name}" selected>${ing.name}</option>
+                <option value="__new__">+ Add new ingredient...</option>
+            </select>
+            <input type="text" class="form-input" style="flex:1;" value="${(ing.amount || '').replace(/"/g, '&quot;')}" placeholder="Amount" class="ing-amount">
+            <button type="button" class="btn btn-danger btn-sm" onclick="this.closest('.form-row').remove()">✕</button>
+        </div>
+    `).join('') || `
+        <div class="form-row" style="margin-bottom:8px;align-items:center;">
+            <select class="form-select ingredient-select" style="flex:2;" onchange="handleIngredientSelect(this)">
+                <option value="">Select ingredient...</option>
+                ${ingredientOptions}
+                <option value="__new__">+ Add new ingredient...</option>
+            </select>
+            <input type="text" class="form-input" style="flex:1;" placeholder="Amount" class="ing-amount">
+            <button type="button" class="btn btn-danger btn-sm" onclick="this.closest('.form-row').remove()">✕</button>
+        </div>
+    `;
+    
+    showModal('Edit Recipe', `
+        <div class="form-group">
+            <label class="form-label">Food Name *</label>
+            <input type="text" class="form-input" id="editRecipeName" value="${recipe.name.replace(/"/g, '&quot;')}">
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Food Type</label>
+                <select class="form-select" id="editRecipeFoodType">
+                    <option value="Drink" ${recipe.food_type === 'Drink' ? 'selected' : ''}>Drink</option>
+                    <option value="Appetizer" ${recipe.food_type === 'Appetizer' ? 'selected' : ''}>Appetizer</option>
+                    <option value="Entree" ${recipe.food_type === 'Entree' ? 'selected' : ''}>Entree</option>
+                    <option value="Snack" ${recipe.food_type === 'Snack' ? 'selected' : ''}>Snack</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Servings</label>
+                <input type="number" class="form-input" id="editRecipeServings" value="${recipe.servings || 4}" min="1">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-textarea" id="editRecipeDescription">${recipe.description || ''}</textarea>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Prep Time (mins)</label>
+                <input type="number" class="form-input" id="editRecipePrepTime" value="${recipe.prep_time || 0}" min="0" onchange="updateEditTotalTime()">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Cook Time (mins)</label>
+                <input type="number" class="form-input" id="editRecipeCookTime" value="${recipe.cook_time || 0}" min="0" onchange="updateEditTotalTime()">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Total Time: <span id="editTotalTimeDisplay" style="color:var(--primary);font-weight:700;">
+                ${(() => {
+                    const t = (recipe.prep_time || 0) + (recipe.cook_time || 0);
+                    if (t >= 60) return `${Math.floor(t/60)}h ${t%60}m`;
+                    return `${t} mins`;
+                })()}
+            </span></label>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Portion Size</label>
+                <input type="text" class="form-input" id="editRecipePortion" value="${(recipe.portion_size || '').replace(/"/g, '&quot;')}" placeholder="e.g., 1 cup, 2 tacos">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Difficulty</label>
+                <select class="form-select" id="editRecipeDifficulty">
+                    <option value="Easy" ${recipe.difficulty === 'Easy' ? 'selected' : ''}>Easy</option>
+                    <option value="Medium" ${recipe.difficulty === 'Medium' ? 'selected' : ''}>Medium</option>
+                    <option value="Hard" ${recipe.difficulty === 'Hard' ? 'selected' : ''}>Hard</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label class="form-label">Ingredients</label>
+            <div id="editIngredientsList">
+                ${ingredientRows}
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="addEditIngredientRow()">+ Add Ingredient</button>
+        </div>
+        
+        <div class="form-group">
+            <label class="form-label">Instructions</label>
+            <textarea class="form-textarea" id="editRecipeInstructions">${recipe.instructions || ''}</textarea>
+        </div>
+        <div style="display:flex;gap:8px;">
+            <button class="btn btn-primary w-full" onclick="submitEditRecipe('${recipeId}')">Save Changes</button>
+            <button class="btn btn-danger" onclick="deleteRecipe('${recipeId}')">🗑️ Delete</button>
+        </div>
+    `);
+}
+
+function updateEditTotalTime() {
+    const prep = parseInt(document.getElementById('editRecipePrepTime')?.value) || 0;
+    const cook = parseInt(document.getElementById('editRecipeCookTime')?.value) || 0;
+    const total = prep + cook;
+    
+    let display = '';
+    if (total >= 60) {
+        const hrs = Math.floor(total / 60);
+        const mins = total % 60;
+        display = `${hrs}h${mins > 0 ? ' ' + mins + 'm' : ''}`;
+    } else {
+        display = `${total} mins`;
+    }
+    
+    const el = document.getElementById('editTotalTimeDisplay');
+    if (el) el.textContent = display;
+}
+
+function addEditIngredientRow() {
+    const list = document.getElementById('editIngredientsList');
+    const options = store.sharedIngredients.map(ing => 
+        `<option value="${ing.name}">${ing.name}</option>`
+    ).join('');
+    
+    const row = document.createElement('div');
+    row.className = 'form-row';
+    row.style.marginBottom = '8px';
+    row.style.alignItems = 'center';
+    row.innerHTML = `
+        <select class="form-select ingredient-select" style="flex:2;" onchange="handleIngredientSelect(this)">
+            <option value="">Select ingredient...</option>
+            ${options}
+            <option value="__new__">+ Add new ingredient...</option>
+        </select>
+        <input type="text" class="form-input" style="flex:1;" placeholder="Amount" class="ing-amount">
+        <button type="button" class="btn btn-danger btn-sm" onclick="this.closest('.form-row').remove()">✕</button>
+    `;
+    list.appendChild(row);
+}
+
+function addEditIngredientRow() {
+    const list = document.getElementById('editIngredientsList');
+    if (!list) return;
+    
+    const options = store.sharedIngredients.map(ing => 
+        `<option value="${ing.name}">${ing.name}</option>`
+    ).join('');
+    
+    const row = document.createElement('div');
+    row.className = 'ingredient-row';
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;';
+    row.innerHTML = `
+        <select class="form-select ingredient-select" style="flex:2;min-width:0;" onchange="handleIngredientSelect(this)">
+            <option value="">Select ingredient...</option>
+            ${options}
+            <option value="__new__">+ Add new ingredient...</option>
+        </select>
+        <input type="text" class="form-input ing-amount" style="flex:1;min-width:0;" placeholder="Amount">
+        <button type="button" class="btn btn-danger btn-sm" onclick="removeIngredientRow(this)" style="flex-shrink:0;">✕</button>
+    `;
+    list.appendChild(row);
+}
+
+async function submitEditRecipe(recipeId) {
+    const name = document.getElementById('editRecipeName').value.trim();
+    const foodType = document.getElementById('editRecipeFoodType').value;
+    const description = document.getElementById('editRecipeDescription').value.trim();
+    const instructions = document.getElementById('editRecipeInstructions').value.trim();
+    const servings = parseInt(document.getElementById('editRecipeServings').value) || null;
+    const prepTime = parseInt(document.getElementById('editRecipePrepTime').value) || 0;
+    const cookTime = parseInt(document.getElementById('editRecipeCookTime').value) || 0;
+    const portion = document.getElementById('editRecipePortion').value.trim() || null;
+    const difficulty = document.getElementById('editRecipeDifficulty').value;
     
     if (!name) { alert('Food name is required'); return; }
     
     // Collect ingredients
-    const rows = document.querySelectorAll('#ingredientsList .form-row');
+    const rows = document.querySelectorAll('#editIngredientsList .form-row');
     const ingredients = [];
-    rows.forEach(row => {
-        const inputs = row.querySelectorAll('input');
-        if (inputs[0].value.trim()) {
+    for (const row of rows) {
+        const select = row.querySelector('.ingredient-select');
+        const amountInput = row.querySelector('input');
+        const ingName = select?.value;
+        if (ingName && ingName !== '__new__' && ingName !== '') {
             ingredients.push({
-                name: inputs[0].value.trim(),
-                amount: inputs[1].value.trim() || '1'
+                name: ingName,
+                amount: amountInput?.value.trim() || '1'
             });
+            await addSharedIngredient(ingName);
         }
-    });
+    }
     
-    const success = await addRecipe(name, description, JSON.stringify(ingredients), instructions, foodType);
-    if (success) closeModal();
+    const { error } = await supabaseClient
+        .from('recipes')
+        .update({
+            name,
+            food_type: foodType,
+            description,
+            ingredients: JSON.stringify(ingredients),
+            instructions,
+            servings,
+            prep_time: prepTime,
+            cook_time: cookTime,
+            portion_size: portion,
+            difficulty
+        })
+        .eq('id', recipeId);
+    
+    if (error) { alert('Error: ' + error.message); return; }
+    
+    await loadRecipes();
+    renderPage('recipes');
+    closeModal();
+}
+
+async function deleteRecipe(recipeId) {
+    if (!confirm('Delete this recipe?')) return;
+    
+    const { error } = await supabaseClient
+        .from('recipes')
+        .delete()
+        .eq('id', recipeId);
+    
+    if (error) { alert('Error: ' + error.message); return; }
+    
+    await loadRecipes();
+    renderPage('recipes');
+    closeModal();
 }
 
 // ==================== RENDER: CALENDAR ====================
 let calendarCurrentDate = new Date();
 
-// Helper: format a date for display, handling timezone correctly
-// For all-day events (midnight UTC), show the date as stored (don't convert timezone)
-// For timed events, convert to local time
 function formatEventDate(startTime, eventType) {
     const date = new Date(startTime);
     const isAllDay = eventType === 'birthday' || eventType === 'anniversary' || 
