@@ -936,6 +936,29 @@ body {
     gap: 6px;
 }
 
+.chore-panel {
+    display: none;
+}
+
+.chore-panel.active {
+    display: block;
+    animation: fadeIn 0.3s ease;
+}
+
+.multi-room-checkbox:checked + span {
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.multi-room-checkbox:checked {
+    accent-color: var(--primary);
+}
+
+.batch-chore-checkbox:checked + span,
+.batch-room-checkbox:checked + span {
+    color: var(--primary);
+    font-weight: 600;
+}
 /* ==================== CHORE TIMER ==================== */
 .chore-timer {
     display: flex;

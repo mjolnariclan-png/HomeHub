@@ -37,7 +37,7 @@ const store = {
 // ==================== ROOM CONFIGURATION ====================
 const ROOMS = [
     'Backyard', 'Bathroom', 'Boys Bedroom', 'Dads Game Room', 'Front Yard',
-    'Garage', 'Hallway', 'Kitchen', 'Laundry room', 'Living room',
+    'Garage', 'Hallway', 'Kitchen', 'Laundry Room', 'Living Room',
     'Moms Art Area', 'Mom and Dads Room', 'Peytons Bedroom', 'Playroom', 'Random',
     'Truck', 'Turbo (Cat)', 'Van', 'Zeus (Dog)'
 ];
@@ -2507,68 +2507,278 @@ function showAddChoreModal() {
         `<option value="${m.id}">${m.display_name || m.username}</option>`
     ).join('');
     
+    // Predefined common chores
+    const COMMON_CHORES = [
+        'Toys Put Away', 'Trash', 'Laundry', 'Books', 'Dishes',
+        'Sweep', 'Mop', 'Dust', 'Vacuum', 'Make Bed',
+        'Wipe Counters', 'Clean Mirror', 'Take Out Trash', 'Fold Clothes', 'Organize'
+    ];
+    
+    const choreCheckboxes = COMMON_CHORES.map(chore => `
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg);border-radius:8px;cursor:pointer;transition:all 0.2s;">
+            <input type="checkbox" class="batch-chore-checkbox" value="${chore}" style="width:18px;height:18px;accent-color:var(--primary);">
+            <span>${chore}</span>
+        </label>
+    `).join('');
+    
+    const roomCheckboxes = ROOMS.map(room => `
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg);border-radius:8px;cursor:pointer;transition:all 0.2s;">
+            <input type="checkbox" class="batch-room-checkbox" value="${room}" style="width:18px;height:18px;accent-color:var(--primary);">
+            <span>${room}</span>
+        </label>
+    `).join('');
+    
     showModal('Add Chore', `
-        <div class="form-group">
-            <label class="form-label">Title *</label>
-            <input type="text" class="form-input" id="choreTitle" placeholder="What needs to be done?">
-        </div>
-        <div class="form-group">
-            <label class="form-label">Description</label>
-            <textarea class="form-textarea" id="choreDescription" placeholder="Details..."></textarea>
-        </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label class="form-label">Points</label>
-                <input type="number" class="form-input" id="chorePoints" value="1" min="0">
-            </div>
-            <div class="form-group">
-                <label class="form-label">Value ($)</label>
-                <input type="number" class="form-input" id="choreValue" value="0.50" min="0" step="0.01">
+        <div style="margin-bottom:16px;">
+            <div class="view-tabs" style="border-radius:8px;">
+                <button type="button" class="view-tab active" onclick="switchChoreTab('single')" id="chore-tab-single">
+                    📋 Single Chore
+                </button>
+                <button type="button" class="view-tab" onclick="switchChoreTab('batch')" id="chore-tab-batch">
+                    ⚡ Batch Creator
+                </button>
             </div>
         </div>
-        <div class="form-row">
+        
+        <!-- SINGLE CHORE TAB -->
+        <div id="chore-panel-single" class="chore-panel active">
             <div class="form-group">
-                <label class="form-label">Category</label>
-                <select class="form-select" id="choreCategory">
-                    <option value="Cleaning">Cleaning</option>
-                    <option value="Organizing">Organizing</option>
-                    <option value="Other">Other</option>
-                    <option value="Pet Care">Pet Care</option>
-                    <option value="Yard Work">Yard Work</option>
-                </select>
+                <label class="form-label">Title *</label>
+                <input type="text" class="form-input" id="choreTitle" placeholder="What needs to be done?">
             </div>
             <div class="form-group">
-                <label class="form-label">Room/Location</label>
-                <select class="form-select" id="choreRoom">
-                    ${ROOMS.map(room => `<option value="${room}">${room}</option>`).join('')}
-                </select>
+                <label class="form-label">Description</label>
+                <textarea class="form-textarea" id="choreDescription" placeholder="Details..."></textarea>
             </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Points</label>
+                    <input type="number" class="form-input" id="chorePoints" value="1" min="0">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Value ($)</label>
+                    <input type="number" class="form-input" id="choreValue" value="0.50" min="0" step="0.01">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Category</label>
+                    <select class="form-select" id="choreCategory">
+                        <option value="Cleaning">Cleaning</option>
+                        <option value="Organizing">Organizing</option>
+                        <option value="Other">Other</option>
+                        <option value="Pet Care">Pet Care</option>
+                        <option value="Yard Work">Yard Work</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Room/Location</label>
+                    <select class="form-select" id="choreRoom">
+                        ${ROOMS.map(room => `<option value="${room}">${room}</option>`).join('')}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Recurrence</label>
+                    <select class="form-select" id="choreRecurrence">
+                        <option value="none">One Time</option>
+                        <option value="daily">Daily (Every 24 Hours)</option>
+                        <option value="every_3_days">Every 3 Days (72 Hours)</option>
+                        <option value="weekly">Weekly (Every Sunday)</option>
+                        <option value="bi_weekly">Bi-Weekly (Every 2 Sundays)</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="quarterly">Quarterly (Every 3 Months)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Assigned To</label>
+                    <select class="form-select" id="choreAssignedTo">
+                        <option value="">Unassigned</option>
+                        ${memberOptions}
+                    </select>
+                </div>
+            </div>
+            <button class="btn btn-primary w-full" onclick="submitChore()">Add Chore</button>
         </div>
-        <div class="form-row">
-            <div class="form-group">
-            <label class="form-label">Recurrence</label>
-                <select class="form-select" id="choreRecurrence">
-                    <option value="none">One Time</option>
-                    <option value="daily">Daily (Every 24 Hours)</option>
-                    <option value="every_3_days">Every 3 Days (72 Hours)</option>
-                    <option value="weekly">Weekly (Every Sunday)</option>
-                    <option value="bi_weekly">Bi-Weekly (Every 2 Sundays)</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="quarterly">Quarterly (Every 3 Months)</option>
-                </select>
+        
+        <!-- BATCH CREATOR TAB -->
+        <div id="chore-panel-batch" class="chore-panel" style="display:none;">
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Points</label>
+                    <input type="number" class="form-input" id="batchChorePoints" value="1" min="0">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Value ($)</label>
+                    <input type="number" class="form-input" id="batchChoreValue" value="0.50" min="0" step="0.01">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Category</label>
+                    <select class="form-select" id="batchChoreCategory">
+                        <option value="Cleaning">Cleaning</option>
+                        <option value="Organizing">Organizing</option>
+                        <option value="Other">Other</option>
+                        <option value="Pet Care">Pet Care</option>
+                        <option value="Yard Work">Yard Work</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Recurrence</label>
+                    <select class="form-select" id="batchChoreRecurrence">
+                        <option value="none">One Time</option>
+                        <option value="daily">Daily (Every 24 Hours)</option>
+                        <option value="every_3_days">Every 3 Days (72 Hours)</option>
+                        <option value="weekly">Weekly (Every Sunday)</option>
+                        <option value="bi_weekly">Bi-Weekly (Every 2 Sundays)</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="quarterly">Quarterly (Every 3 Months)</option>
+                    </select>
+                </div>
             </div>
             <div class="form-group">
                 <label class="form-label">Assigned To</label>
-                <select class="form-select" id="choreAssignedTo">
+                <select class="form-select" id="batchChoreAssignedTo">
                     <option value="">Unassigned</option>
                     ${memberOptions}
                 </select>
             </div>
+            
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+                <!-- CHORES COLUMN -->
+                <div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <label class="form-label" style="margin:0;">Select Chores</label>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleAllBatch('chore', true)">All</button>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;padding:4px;">
+                        ${choreCheckboxes}
+                    </div>
+                    <div style="margin-top:8px;">
+                        <input type="text" class="form-input" id="batchCustomChore" placeholder="+ Add custom chore name..." 
+                               onkeypress="if(event.key==='Enter') addCustomBatchChore()">
+                    </div>
+                </div>
+                
+                <!-- ROOMS COLUMN -->
+                <div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <label class="form-label" style="margin:0;">Select Rooms</label>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleAllBatch('room', true)">All</button>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;padding:4px;">
+                        ${roomCheckboxes}
+                    </div>
+                </div>
+            </div>
+            
+            <div id="batchPreview" style="margin-top:16px;padding:12px;background:var(--bg);border-radius:8px;font-size:0.875rem;">
+                <div style="color:var(--text-muted);">Select chores and rooms to see preview...</div>
+            </div>
+            
+            <button class="btn btn-primary w-full" style="margin-top:16px;" onclick="submitBatchChores()">Create All Chores</button>
         </div>
-        <button class="btn btn-primary w-full" onclick="submitChore()">Add Chore</button>
     `);
+    
+    // Attach live preview updater
+    setTimeout(() => {
+        document.querySelectorAll('.batch-chore-checkbox, .batch-room-checkbox').forEach(cb => {
+            cb.addEventListener('change', updateBatchPreview);
+        });
+    }, 50);
 }
 
+function switchChoreTab(tab) {
+    document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
+    document.getElementById(`chore-tab-${tab}`).classList.add('active');
+    
+    document.querySelectorAll('.chore-panel').forEach(p => p.style.display = 'none');
+    document.getElementById(`chore-panel-${tab}`).style.display = 'block';
+}
+
+function toggleAllBatch(type, checked) {
+    document.querySelectorAll(`.batch-${type}-checkbox`).forEach(cb => cb.checked = checked);
+    updateBatchPreview();
+}
+
+function addCustomBatchChore() {
+    const input = document.getElementById('batchCustomChore');
+    const name = input.value.trim();
+    if (!name) return;
+    
+    const container = input.parentElement.previousElementSibling;
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg);border-radius:8px;cursor:pointer;transition:all 0.2s;';
+    label.innerHTML = `
+        <input type="checkbox" class="batch-chore-checkbox" value="${name}" checked style="width:18px;height:18px;accent-color:var(--primary);">
+        <span>${name}</span>
+    `;
+    container.appendChild(label);
+    label.querySelector('input').addEventListener('change', updateBatchPreview);
+    
+    input.value = '';
+    updateBatchPreview();
+}
+
+function updateBatchPreview() {
+    const chores = Array.from(document.querySelectorAll('.batch-chore-checkbox:checked')).map(cb => cb.value);
+    const rooms = Array.from(document.querySelectorAll('.batch-room-checkbox:checked')).map(cb => cb.value);
+    const preview = document.getElementById('batchPreview');
+    
+    if (chores.length === 0 || rooms.length === 0) {
+        preview.innerHTML = '<div style="color:var(--text-muted);">Select chores and rooms to see preview...</div>';
+        return;
+    }
+    
+    const total = chores.length * rooms.length;
+    preview.innerHTML = `
+        <div style="font-weight:600;margin-bottom:8px;">📋 Will create ${total} chore${total > 1 ? 's' : ''}:</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;">
+            ${chores.map(chore => rooms.map(room => 
+                `<span style="padding:4px 10px;background:var(--surface);border-radius:6px;border:1px solid var(--surface-light);font-size:0.8rem;">${chore} — ${room}</span>`
+            ).join('')).join('')}
+        </div>
+    `;
+}
+
+async function submitBatchChores() {
+    const points = parseInt(document.getElementById('batchChorePoints').value) || 0;
+    const value = parseFloat(document.getElementById('batchChoreValue').value) || 0;
+    const category = document.getElementById('batchChoreCategory').value;
+    const recurrence = document.getElementById('batchChoreRecurrence').value;
+    const assignedTo = document.getElementById('batchChoreAssignedTo').value;
+    
+    const chores = Array.from(document.querySelectorAll('.batch-chore-checkbox:checked')).map(cb => cb.value);
+    const rooms = Array.from(document.querySelectorAll('.batch-room-checkbox:checked')).map(cb => cb.value);
+    
+    if (chores.length === 0) { alert('Please select at least one chore'); return; }
+    if (rooms.length === 0) { alert('Please select at least one room'); return; }
+    
+    // Create every combination
+    const promises = [];
+    for (const choreName of chores) {
+        for (const room of rooms) {
+            promises.push(
+                addChore(choreName, '', value, points, category, room, recurrence, assignedTo || null)
+            );
+        }
+    }
+    
+    await Promise.all(promises);
+    closeModal();
+    await loadChores();
+    renderPage('chores');
+}
+
+function switchChoreTab(tab) {
+    document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
+    document.getElementById(`chore-tab-${tab}`).classList.add('active');
+    
+    document.querySelectorAll('.chore-panel').forEach(p => p.style.display = 'none');
+    document.getElementById(`chore-panel-${tab}`).style.display = 'block';
+}
 async function submitChore() {
     const title = document.getElementById('choreTitle').value.trim();
     const description = document.getElementById('choreDescription').value.trim();
@@ -2583,6 +2793,33 @@ async function submitChore() {
     
     const success = await addChore(title, description, value, points, category, room, recurrence, assignedTo || null);
     if (success) closeModal();
+}
+
+async function submitMultiChore() {
+    const title = document.getElementById('multiChoreTitle').value.trim();
+    const description = document.getElementById('multiChoreDescription').value.trim();
+    const points = parseInt(document.getElementById('multiChorePoints').value) || 0;
+    const value = parseFloat(document.getElementById('multiChoreValue').value) || 0;
+    const category = document.getElementById('multiChoreCategory').value;
+    const recurrence = document.getElementById('multiChoreRecurrence').value;
+    const assignedTo = document.getElementById('multiChoreAssignedTo').value;
+    
+    // Get selected rooms
+    const selectedRooms = Array.from(document.querySelectorAll('.multi-room-checkbox:checked'))
+        .map(cb => cb.value);
+    
+    if (!title) { alert('Title is required'); return; }
+    if (selectedRooms.length === 0) { alert('Please select at least one room'); return; }
+    
+    // Create a chore for each selected room
+    const promises = selectedRooms.map(room => 
+        addChore(title, description, value, points, category, room, recurrence, assignedTo || null)
+    );
+    
+    await Promise.all(promises);
+    closeModal();
+    await loadChores();
+    renderPage('chores');
 }
 
 // ==================== RENDER: RECIPES ====================
