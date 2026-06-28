@@ -36,11 +36,12 @@ const store = {
 
 // ==================== ROOM CONFIGURATION ====================
 const ROOMS = [
-    'Bathroom', 'Kitchen', 'Living Room', 'Boys Bedroom', 'Girls Bedroom',
-    'Playroom', 'Van', 'Truck', 'Outside', 'Random',
-    'Zues (Dog)', 'Turbo (Cat)', 'Mom and Dads Room',
-    'Dads Game Room', 'Moms Art/Laundry Room'
+    'Backyard', 'Bathroom', 'Boys Bedroom', 'Dads Game Room', 'Front Yard',
+    'Garage', 'Hallway', 'Kitchen', 'Laundry room', 'Living room',
+    'Moms Art Area', 'Mom and Dads Room', 'Peytons Bedroom', 'Playroom', 'Random',
+    'Truck', 'Turbo (Cat)', 'Van', 'Zeus (Dog)'
 ];
+
 
 let signupMode = 'create';
 
@@ -2027,7 +2028,7 @@ function renderChores(container) {
     const renderPersonChoreDetail = (choreList, personName) => {
         if (choreList.length === 0) return '<div class="empty-state-small">No chores for ' + personName + '</div>';
         const grouped = {};
-        const recurrences = ['daily', 'weekly', 'monthly', 'none'];
+        const recurrences = ['daily', 'every_3_days', 'weekly', 'bi_weekly', 'monthly', 'quarterly', 'none'];
         recurrences.forEach(rec => {
             grouped[rec] = {};
             ROOMS.forEach(room => grouped[rec][room] = []);
@@ -2283,10 +2284,9 @@ function showEditChoreModal(choreId) {
                 <select class="form-select" id="editChoreCategory">
                     <option value="Cleaning" ${chore.category === 'Cleaning' ? 'selected' : ''}>Cleaning</option>
                     <option value="Organizing" ${chore.category === 'Organizing' ? 'selected' : ''}>Organizing</option>
-                    <option value="Yard Work" ${chore.category === 'Yard Work' ? 'selected' : ''}>Yard Work</option>
-                    <option value="Pet Care" ${chore.category === 'Pet Care' ? 'selected' : ''}>Pet Care</option>
-                    <option value="Kitchen" ${chore.category === 'Kitchen' ? 'selected' : ''}>Kitchen</option>
                     <option value="Other" ${chore.category === 'Other' ? 'selected' : ''}>Other</option>
+                    <option value="Pet Care" ${chore.category === 'Pet Care' ? 'selected' : ''}>Pet Care</option>
+                    <option value="Yard Work" ${chore.category === 'Yard Work' ? 'selected' : ''}>Yard Work</option>
                 </select>
             </div>
             <div class="form-group">
@@ -2532,10 +2532,9 @@ function showAddChoreModal() {
                 <select class="form-select" id="choreCategory">
                     <option value="Cleaning">Cleaning</option>
                     <option value="Organizing">Organizing</option>
-                    <option value="Yard Work">Yard Work</option>
-                    <option value="Pet Care">Pet Care</option>
-                    <option value="Kitchen">Kitchen</option>
                     <option value="Other">Other</option>
+                    <option value="Pet Care">Pet Care</option>
+                    <option value="Yard Work">Yard Work</option>
                 </select>
             </div>
             <div class="form-group">
