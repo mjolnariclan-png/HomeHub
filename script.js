@@ -30,6 +30,7 @@ const store = {
     notifications: [],
     badges: [],
     storeItems: [],
+    selectedPendingCompletions: [],
     loading: {},
     channels: {},
     currentPage: 'login'
@@ -160,7 +161,7 @@ function applyCurrentUserTheme() {
     const bg = getStoredProfileBackground(store.user?.id);
     if (bg) {
         root.style.setProperty('--active-main-bg', `url('${bg}')`);
-        root.style.setProperty('--active-main-bg-size', '100% auto');
+        root.style.setProperty('--active-main-bg-size', 'cover');
     } else {
         root.style.setProperty('--active-main-bg', 'var(--viking-main-image)');
         root.style.setProperty('--active-main-bg-size', 'cover');
@@ -242,7 +243,7 @@ async function uploadMyBackground(event) {
         return;
     }
 
-    const bgData = await resizeImageForStorage(file, 1920, 1080, false);
+    const bgData = await resizeImageForStorage(file, 1600, 900, false);
     const key = getBackgroundStorageKey(store.user?.id);
     if (!setStoredImage(key, bgData)) return;
 
@@ -1548,38 +1549,69 @@ async function submitTabletChoreCompletion(choreId) {
     });
 }
 
+function getSelectedPendingCompletionIds() {
+    return new Set(store.selectedPendingCompletions || []);
+}
 
-async function approveChore(completionId, choreId, userId, points, value) {
-    const isAdmin = hasHouseholdControlAccess();
-    if (!isAdmin) { alert('Only parents/admins can approve chores.'); return; }
-    
-    // Step 1: Update completion status
+function isPendingCompletionSelected(completionId) {
+    return getSelectedPendingCompletionIds().has(completionId);
+}
+
+function togglePendingCompletionSelection(completionId, checked) {
+    const current = new Set(store.selectedPendingCompletions || []);
+    if (checked) {
+        current.add(completionId);
+    } else {
+        current.delete(completionId);
+    }
+    store.selectedPendingCompletions = Array.from(current);
+}
+
+function setAllPendingCompletionsSelected(checked) {
+    store.selectedPendingCompletions = checked
+        ? store.pendingCompletions.map(pc => pc.id)
+        : [];
+    renderPage('chores');
+}
+
+function clearPendingCompletionSelection() {
+    store.selectedPendingCompletions = [];
+    renderPage('chores');
+}
+
+async function applyChoreApproval(completionId, choreId, userId, points, value, options = {}) {
+    const { silent = false } = options;
+
     const { error: updateError } = await supabaseClient
         .from('chore_completions')
-        .update({ 
-            status: 'approved', 
-            approved_by: store.user.id, 
-            approved_at: new Date().toISOString() 
+        .update({
+            status: 'approved',
+            approved_by: store.user.id,
+            approved_at: new Date().toISOString()
         })
         .eq('id', completionId)
         .select();
-        
-    if (updateError) { 
-        alert('Error approving: ' + updateError.message); 
-        return; 
+
+    if (updateError) {
+        if (!silent) alert('Error approving: ' + updateError.message);
+        return false;
     }
-    
-    // Step 2: Award points and money with level multiplier
+
     const member = store.familyMembers.find(m => m.id === userId);
-    const level = member?.level || 1;
+    if (!member) {
+        if (!silent) alert('Member not found for approval.');
+        return false;
+    }
+
+    const level = member.level || 1;
     const multiplier = parseFloat(getLevelMultiplier(level));
     const finalPoints = Math.round((points || 0) * multiplier);
     const finalValue = parseFloat((value || 0) * multiplier);
-    
-    const newPoints = (member?.points || 0) + finalPoints;
-    const newBalance = (member?.balance || 0) + finalValue;
+
+    const newPoints = (member.points || 0) + finalPoints;
+    const newBalance = (member.balance || 0) + finalValue;
     const newLevel = getLevelFromPoints(newPoints);
-    
+
     const { error: profileError } = await supabaseClient
         .from('profiles')
         .update({
@@ -1589,20 +1621,108 @@ async function approveChore(completionId, choreId, userId, points, value) {
         })
         .eq('id', userId)
         .select();
-    
+
     if (profileError) {
-        alert('Error awarding points: ' + profileError.message);
-        return;
+        if (!silent) alert('Error awarding points: ' + profileError.message);
+        return false;
     }
-    
-    // Step 3: Update last completed time on the chore
+
+    member.points = newPoints;
+    member.balance = newBalance;
+    member.level = newLevel;
+
     await supabaseClient
         .from('chores')
         .update({ last_completed_at: new Date().toISOString() })
         .eq('id', choreId);
 
-    alert('Chore approved! ' + finalPoints + ' pts and $' + finalValue.toFixed(2) + ' awarded.');
+    if (!silent) {
+        alert('Chore approved! ' + finalPoints + ' pts and $' + finalValue.toFixed(2) + ' awarded.');
+    }
 
+    return true;
+}
+
+async function applyChoreRejection(completionId, options = {}) {
+    const { silent = false } = options;
+
+    const { error } = await supabaseClient
+        .from('chore_completions')
+        .update({
+            status: 'rejected',
+            reviewed_by: store.user.id,
+            reviewed_at: new Date().toISOString()
+        })
+        .eq('id', completionId)
+        .select();
+
+    if (error) {
+        if (!silent) alert('Error: ' + error.message);
+        return false;
+    }
+
+    if (!silent) alert('Chore rejected.');
+    return true;
+}
+
+async function approveSelectedChores() {
+    const selectedIds = getSelectedPendingCompletionIds();
+    if (selectedIds.size === 0) {
+        alert('Select one or more pending chores first.');
+        return;
+    }
+
+    const selected = store.pendingCompletions.filter(pc => selectedIds.has(pc.id));
+    let approvedCount = 0;
+
+    for (const pc of selected) {
+        const chore = pc.chore;
+        if (!chore) continue;
+        const ok = await applyChoreApproval(pc.id, pc.chore_id, pc.completed_by, chore.points || 0, chore.value || 0, { silent: true });
+        if (ok) approvedCount += 1;
+    }
+
+    store.selectedPendingCompletions = [];
+    await loadFamilyData();
+    await loadChores();
+    renderPage('chores');
+
+    if (approvedCount > 0) {
+        alert(`Approved ${approvedCount} chore${approvedCount === 1 ? '' : 's'}.`);
+    }
+}
+
+async function rejectSelectedChores() {
+    const selectedIds = getSelectedPendingCompletionIds();
+    if (selectedIds.size === 0) {
+        alert('Select one or more pending chores first.');
+        return;
+    }
+
+    const selected = store.pendingCompletions.filter(pc => selectedIds.has(pc.id));
+    let rejectedCount = 0;
+
+    for (const pc of selected) {
+        const ok = await applyChoreRejection(pc.id, { silent: true });
+        if (ok) rejectedCount += 1;
+    }
+
+    store.selectedPendingCompletions = [];
+    await loadFamilyData();
+    await loadChores();
+    renderPage('chores');
+
+    if (rejectedCount > 0) {
+        alert(`Rejected ${rejectedCount} chore${rejectedCount === 1 ? '' : 's'}.`);
+    }
+}
+
+
+async function approveChore(completionId, choreId, userId, points, value) {
+    const isAdmin = hasHouseholdControlAccess();
+    if (!isAdmin) { alert('Only parents/admins can approve chores.'); return; }
+
+    await applyChoreApproval(completionId, choreId, userId, points, value);
     await loadFamilyData();
     await loadChores();
     renderPage('chores');
@@ -1611,19 +1731,8 @@ async function approveChore(completionId, choreId, userId, points, value) {
 async function rejectChore(completionId) {
     const isAdmin = hasHouseholdControlAccess();
     if (!isAdmin) { alert('Only parents/admins can reject chores.'); return; }
-    
-    const { error } = await supabaseClient
-        .from('chore_completions')
-        .update({ 
-            status: 'rejected', 
-            reviewed_by: store.user.id, 
-            reviewed_at: new Date().toISOString() 
-        })
-        .eq('id', completionId)
-        .select();
-    
-    if (error) { alert('Error: ' + error.message); return; }
-    alert('Chore rejected.');
+
+    await applyChoreRejection(completionId);
     await loadChores();
     renderPage('chores');
 }
@@ -2302,73 +2411,43 @@ function emptyState(icon, title, subtitle) {
 // Returns the next available completion time based on recurrence
 function getNextCompletionTime(lastCompleted, recurrence) {
     if (!lastCompleted) return null;
-    
+
     const last = new Date(lastCompleted);
-    // Convert UTC to CST (UTC-6 standard, UTC-5 DST)
-    // America/Chicago handles DST automatically
-    const lastCST = new Date(last.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
-    
-    let nextAvailable = new Date(lastCST);
-    
+    const next = new Date(last.getTime());
+
     switch (recurrence) {
-        case 'daily': {
-            // Next day at midnight local time
-            nextAvailable.setHours(nextAvailable.getHours() + 24);
+        case 'daily':
+            next.setDate(next.getDate() + 1);
             break;
-        }
-        case 'every_3_days': {
-            // 3 days later at midnight local time
-            nextAvailable.setHours(nextAvailable.getHours() + 72);
+        case 'every_3_days':
+            next.setDate(next.getDate() + 3);
             break;
-        }
         case 'weekly': {
-            // Next Sunday at midnight local time
-            const dayOfWeek = nextAvailable.getDay(); // 0 = Sunday, 1 = Monday...
-            const daysUntilSunday = (7 - dayOfWeek) % 7;
-            nextAvailable.setDate(nextAvailable.getDate() + daysUntilSunday);
-            nextAvailable.setHours(0, 0, 0, 0);
-            if (nextAvailable <= lastCST) {
-                nextAvailable.setDate(nextAvailable.getDate() + 7);
-            }
+            next.setDate(next.getDate() + 7);
             break;
         }
         case 'bi_weekly': {
-            const dayofWeek = nextAvailable.getDay();
-            const daysUntilSunday = (7 - dayOfWeek) % 7;
-            nextAvailable.setDate(nextAvailable.getDate() + daysUntilSunday);
-            nextAvailable.setHours(0, 0, 0, 0);
-            if (nextAvailable <= lastCST) {
-                nextAvailable.setDate(nextAvailable.getDate() + 7);
-            }
-            nextAvailable.setDate(nextAvailable.getDate() + 7);
+            next.setDate(next.getDate() + 14);
             break;
         }
         case 'monthly': {
-            // 1st of next month at midnight local time
-            const currentDay = nextAvailable.getDate();
-            nextAvailable.setMonth(nextAvailable.getMonth() + 1);
-            if (nextAvailable.getDate() !== currentDay) {
-                nextAvailable.setDate(0);
-            }
-            nextAvailable.setHours(0, 0, 0, 0);
+            const day = next.getDate();
+            next.setMonth(next.getMonth() + 1);
+            if (next.getDate() !== day) next.setDate(0);
             break;
         }
         case 'quarterly': {
-            // Every 3 months, same day (clamped)
-            const currentDay = nextAvailable.getDate();
-            nextAvailable.setMonth(nextAvailable.getMonth() + 3);
-            if (nextAvailable.getDate() !== currentDay) {
-                nextAvailable.setDate(0);
-            }
-            nextAvailable.setHours(0, 0, 0, 0);
+            const day = next.getDate();
+            next.setMonth(next.getMonth() + 3);
+            if (next.getDate() !== day) next.setDate(0);
             break;
         }
         default:
             return null;
     }
 
-        const offsetMs = nextAvailable.getTime() - lastCST.getTime();
-        return new Date(last.getTime() + offsetMs);
+    next.setHours(0, 0, 0, 0);
+    return next;
     }
 
 function formatCountdown(targetDate) {
@@ -2407,10 +2486,14 @@ function startChoreTimerUpdates() {
     if (window.choreTimerInterval) {
         clearInterval(window.choreTimerInterval);
     }
+
+    window.choreTimerRefreshScheduled = false;
     
     window.choreTimerInterval = setInterval(() => {
+        let shouldRefresh = false;
+
         document.querySelectorAll('.chore-timer, .chore-timer-inline').forEach(timerEl => {
-            const choreId = timerEl.id.replace('timer-', '').replace('timer-btn-', '');
+            const choreId = timerEl.dataset.choreId || timerEl.id.replace('timer-', '').replace('timer-btn-', '');
             const chore = store.chores.find(c => c.id === choreId);
             if (!chore) return;
             
@@ -2418,18 +2501,29 @@ function startChoreTimerUpdates() {
             const available = isChoreAvailable(chore);
             
             if (available) {
-                timerEl.textContent = '⏳ Ready!';
-                timerEl.classList.add('ready');
-                if (!timerEl.dataset.reloaded) {
-                    timerEl.dataset.reloaded = 'true';
-                    setTimeout(() => {
-                        loadChores().then(() => renderPage('chores'));
-                    }, 2000);
+                if (timerEl.textContent !== '⏳ Ready!') {
+                    timerEl.textContent = '⏳ Ready!';
+                    timerEl.classList.add('ready');
+                    shouldRefresh = true;
                 }
             } else {
-                timerEl.textContent = '⏳ ' + formatCountdown(nextTime);
+                const countdownText = '⏳ ' + formatCountdown(nextTime);
+                if (timerEl.textContent !== countdownText) {
+                    timerEl.textContent = countdownText;
+                    timerEl.classList.remove('ready');
+                }
             }
         });
+
+        if (shouldRefresh && !window.choreTimerRefreshScheduled) {
+            window.choreTimerRefreshScheduled = true;
+            setTimeout(() => {
+                window.choreTimerRefreshScheduled = false;
+                loadChores().then(() => {
+                    if (store.currentPage === 'chores') renderPage('chores');
+                });
+            }, 1000);
+        }
     }, 1000);
 }
 
@@ -2596,7 +2690,7 @@ function renderChores(container) {
                                             ${chore.recurrence && chore.recurrence !== 'none' ? `<span>🔄 ${chore.recurrence}</span>` : ''}
                                         </div>
                                         ${chore.description ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">${chore.description}</div>` : ''}
-                                        ${isOnCooldown ? `<div style="font-size:0.75rem;color:var(--warning);margin-top:4px;">⏳ Available again in: <span class="chore-timer-inline" id="timer-${chore.id}">${timerText}</span></div>` : ''}
+                                        ${isOnCooldown ? `<div style="font-size:0.75rem;color:var(--warning);margin-top:4px;">⏳ Available again in: <span class="chore-timer-inline" data-chore-id="${chore.id}" id="timer-${chore.id}">${timerText}</span></div>` : ''}
                                         ${isOneTimeDone ? `<div style="font-size:0.75rem;color:var(--success);margin-top:4px;">✅ Completed</div>` : ''}
                                     </div>
                                     <div class="chore-actions">
@@ -2607,7 +2701,7 @@ function renderChores(container) {
                                             ` : isOnCooldown && isTabletMode() ? `
                                             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
                                                 <button class="btn btn-primary btn-sm" disabled style="opacity:0.4;cursor:not-allowed;">Complete</button>
-                                                <div class="chore-timer" id="timer-btn-${chore.id}">⏳ ${timerText}</div>
+                                                <div class="chore-timer" data-chore-id="${chore.id}" id="timer-btn-${chore.id}">⏳ ${timerText}</div>
                                             </div>
                                         ` : `
                                             <button class="btn btn-primary btn-sm" disabled style="opacity:0.4;cursor:not-allowed;">Complete</button>
@@ -2652,12 +2746,22 @@ function renderChores(container) {
                 <div class="card-header">
                     <div class="card-title" style="color:var(--warning);">⏳ Pending Approvals (${store.pendingCompletions.length})</div>
                 </div>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;">
+                    <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;color:var(--text-muted);cursor:pointer;">
+                        <input type="checkbox" ${store.selectedPendingCompletions?.length === store.pendingCompletions.length ? 'checked' : ''} onchange="setAllPendingCompletionsSelected(this.checked)">
+                        Select all
+                    </label>
+                    <button class="btn btn-primary btn-sm" onclick="approveSelectedChores()">✓ Approve Selected</button>
+                    <button class="btn btn-danger btn-sm" onclick="rejectSelectedChores()">✕ Reject Selected</button>
+                    ${store.selectedPendingCompletions?.length > 0 ? `<button class="btn btn-ghost btn-sm" onclick="clearPendingCompletionSelection()">Clear</button>` : ''}
+                </div>
                 <div class="list-container">
                     ${store.pendingCompletions.map(pc => {
                         const color = getUserColorHex(pc.completed_by);
                         const chore = pc.chore;
                         return `
                             <div class="list-item" style="background:rgba(245, 158, 11, 0.05);">
+                                <input type="checkbox" style="width:18px;height:18px;accent-color:var(--primary);" ${isPendingCompletionSelected(pc.id) ? 'checked' : ''} onchange="togglePendingCompletionSelection('${pc.id}', this.checked)">
                                 <div class="user-badge" style="background:${color};"></div>
                                 <div class="list-content">
                                     <div class="list-title">${chore?.title || 'Unknown Chore'}</div>

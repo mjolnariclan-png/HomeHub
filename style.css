@@ -37,16 +37,25 @@
 
 body {
     font-family: 'Almendra', 'Georgia', serif;
+    position: relative;
     background:
         radial-gradient(circle at 12% 16%, rgba(180, 53, 29, 0.22) 0%, transparent 48%),
         radial-gradient(circle at 88% 10%, rgba(242, 140, 40, 0.2) 0%, transparent 46%),
-        linear-gradient(145deg, rgba(24, 13, 9, 0.95), rgba(11, 9, 8, 0.95)),
-        var(--active-main-bg) center/var(--active-main-bg-size) no-repeat;
+        linear-gradient(145deg, rgba(24, 13, 9, 0.95), rgba(11, 9, 8, 0.95));
     color: var(--text);
     overflow: hidden;
-    background-repeat: no-repeat;
+}
+
+body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image: var(--active-main-bg);
     background-position: center;
-    background-size: cover;
+    background-repeat: no-repeat;
+    background-size: var(--active-main-bg-size);
+    z-index: 0;
 }
 
 
@@ -876,13 +885,13 @@ body::before {
         radial-gradient(circle at 80% 25%, rgba(209, 79, 46, 0.08) 0%, transparent 32%),
         radial-gradient(circle at 58% 64%, rgba(255, 125, 40, 0.05) 0%, transparent 30%);
     animation: emberDrift 14s ease-in-out infinite alternate;
-    z-index: 0;
+    z-index: 1;
 }
 
 .app-container,
 .auth-screen {
     position: relative;
-    z-index: 1;
+    z-index: 2;
 }
 
 @keyframes emberDrift {
