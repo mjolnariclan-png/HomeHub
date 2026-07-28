@@ -75,6 +75,30 @@ function hasHouseholdControlAccess(user = store.user) {
     return role === 'admin' || role === 'parent' || role === 'adult';
 }
 
+function isChildAccount(user = store.user) {
+    const role = (user?.role || '').toLowerCase();
+    return role === 'user' || role === 'child';
+}
+
+function canAccessPage(page, user = store.user) {
+    if (!isChildAccount(user)) return true;
+    const childAllowedPages = new Set(['dashboard', 'todo', 'chores', 'store', 'admin', 'calendar', 'leaderboard']);
+    return childAllowedPages.has(page);
+}
+
+function applyPageAccessControl() {
+    const childView = isChildAccount();
+    document.querySelectorAll('.nav-item').forEach((item) => {
+        const page = item.dataset.page;
+        item.style.display = canAccessPage(page) ? '' : 'none';
+    });
+
+    const adminNavText = document.querySelector('.nav-item[data-page="admin"] span:last-child');
+    if (adminNavText) {
+        adminNavText.textContent = childView ? 'Profile' : 'Admin & Profile';
+    }
+}
+
 function getTabletModeStorageKey() {
     return store.user?.id ? `homehub_tablet_mode_${store.user.id}` : 'homehub_tablet_mode';
 }
@@ -153,6 +177,14 @@ function getAvatarInlineStyle(userId) {
         return `background-image:url('${avatar}');background-size:cover;background-position:center;background-color:transparent;`;
     }
     return `background:${getUserColorHex(userId)};`;
+}
+
+function renderAvatarMarkup(userId, displayName, size = 40) {
+    const name = displayName || 'U';
+    const avatar = getStoredProfileAvatar(userId);
+    const style = `${avatar ? 'background:transparent;' : `background:${getUserColorHex(userId)};`}width:${size}px;height:${size}px;${size <= 24 ? 'font-size:0.7rem;' : ''}`;
+
+    return `<div class="avatar" style="${style}">${avatar ? `<img class="avatar-img" src="${avatar}" alt="${name}">` : name.substring(0, 2).toUpperCase()}</div>`;
 }
 
 function updateSidebarAvatar() {
@@ -446,6 +478,12 @@ function getUserName(userId) {
 
 // ==================== NAVIGATION ====================
 function navigateTo(page) {
+    applyPageAccessControl();
+    if (!canAccessPage(page)) {
+        alert('Kids cannot access Shopping List, Budget, Recipes, or Admin controls.');
+        page = 'dashboard';
+    }
+
     store.currentPage = page;
     applyCurrentUserTheme();
     
@@ -463,7 +501,7 @@ function navigateTo(page) {
         calendar: 'Calendar',
         leaderboard: 'Leaderboard',
         budget: 'Budget',
-        admin: 'Admin & Profile'
+        admin: isChildAccount() ? 'Profile' : 'Admin & Profile'
     };
     document.getElementById('pageTitle').textContent = titles[page] || 'Dashboard';
     
@@ -686,6 +724,11 @@ function timeAgo(dateString) {
 }
 
 function renderPage(page) {
+    if (!canAccessPage(page)) {
+        page = 'dashboard';
+        store.currentPage = page;
+    }
+
     applyCurrentUserTheme();
     const container = document.getElementById('contentArea');
     container.innerHTML = '';
@@ -949,6 +992,7 @@ async function bootstrapUser(userId) {
 
     document.getElementById('userRole').textContent = profile.role;
     applyCurrentUserTheme();
+    applyPageAccessControl();
 
     await loadFamilyData()
     setupRealtimeSubscriptions()
@@ -1364,14 +1408,11 @@ async function loadBudget() {
         .select('*')
         .eq('family_id', store.user.family_id)
         .order('due_date', { ascending: true });
-    
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
     const { data: transactions } = await supabaseClient
         .from('transactions')
         .select('*')
         .eq('family_id', store.user.family_id)
-        .gte('created_at', startOfMonth.toISOString())
         .not('description', 'ilike', '%store purchase%')
         .not('description', 'ilike', '%kid store%')
         .not('description', 'ilike', '%purchased%')
@@ -2018,6 +2059,7 @@ async function purchaseStoreItem(itemId, price) {
 
 // ==================== RENDER: DASHBOARD ====================
 function renderDashboard(container) {
+    const childView = isChildAccount();
     const totalIncome = store.budgetEntries
         .filter(e => e.entry_type === 'income')
         .reduce((sum, e) => sum + parseFloat(e.amount), 0);
@@ -2054,11 +2096,13 @@ function renderDashboard(container) {
                     <div class="stat-value" style="color:var(--danger);">${store.chores.length}</div>
                     <div class="stat-label">Available chores</div>
                 </div>
+                ${childView ? '' : `
                 <div class="card dashboard-card-btn" onclick="navigateTo('budget')">
                     <div class="card-title" style="color:var(--text-muted);">💵 Budget</div>
                     <div class="stat-value" style="color:${balance >= 0 ? 'var(--success)' : 'var(--danger)'};">$${balance.toFixed(2)}</div>
                     <div class="stat-label">Monthly balance</div>
                 </div>
+                `}
             </div>
             
             <div class="card" style="margin-top:20px;">
@@ -2124,12 +2168,21 @@ function renderTodo(container) {
         return `
             <div class="room-tabs" id="tabs-${sectionId}">
                 ${peopleWithTodos.map((person, idx) => `
+                    ${(() => {
+                        const tabMember = store.familyMembers.find(m => (m.display_name || m.username || 'Unknown') === person);
+                        const tabAvatar = tabMember ? renderAvatarMarkup(tabMember.id, person, 24) : '';
+                        return `
                     <button class="room-tab ${idx === 0 ? 'active' : ''}" 
                             onclick="switchPersonTab('${sectionId}', '${person}')"
                             data-person="${person}">
-                        ${person}
+                        <span style="display:inline-flex;align-items:center;gap:8px;">
+                            ${tabAvatar}
+                            <span>${person}</span>
+                        </span>
                         <span class="room-count">${todoMap[person].length}</span>
                     </button>
+                `;
+                    })()}
                 `).join('')}
             </div>
             <div class="room-panels" id="panels-${sectionId}">
@@ -2726,12 +2779,21 @@ function renderChores(container) {
         return `
             <div class="room-tabs" id="tabs-${sectionId}">
                 ${peopleWithChores.map((person, idx) => `
+                    ${(() => {
+                        const tabMember = store.familyMembers.find(m => (m.display_name || m.username || 'Unknown') === person);
+                        const tabAvatar = tabMember ? renderAvatarMarkup(tabMember.id, person, 24) : '';
+                        return `
                     <button class="room-tab ${idx === 0 ? 'active' : ''}" 
                             onclick="switchPersonTab('${sectionId}', '${person}')"
                             data-person="${person}">
-                        ${person}
+                        <span style="display:inline-flex;align-items:center;gap:8px;">
+                            ${tabAvatar}
+                            <span>${person}</span>
+                        </span>
                         <span class="room-count">${choreMap[person].length}</span>
                     </button>
+                `;
+                    })()}
                 `).join('')}
             </div>
             <div class="room-panels" id="panels-${sectionId}">
@@ -4671,16 +4733,16 @@ function renderLeaderboard(container) {
                     ${sorted.map((member, index) => {
                         const rank = index + 1;
                         const rankClass = rank <= 3 ? `rank-${rank}` : '';
-                        const color = getUserColorHex(member.id);
                         const level = member.level || 1;
                         const points = member.points || 0;
                         const streak = member.streak_days || 0;
                         const multiplier = getLevelMultiplier(level);
+                        const avatarMarkup = renderAvatarMarkup(member.id, member.display_name || member.username, 40);
                         
                         return `
                             <div class="leaderboard-item">
                                 <div class="rank ${rankClass}">${rank}</div>
-                                <div class="avatar" style="background:${color};">${(member.display_name || member.username).substring(0, 2).toUpperCase()}</div>
+                                ${avatarMarkup}
                                 <div style="flex:1;">
                                     <div style="font-weight:600;">${member.display_name || member.username}</div>
                                     <div style="font-size:0.75rem;color:var(--text-muted);">
@@ -4701,11 +4763,49 @@ function renderLeaderboard(container) {
 }
 
 // ==================== RENDER: BUDGET ====================
+let budgetCurrentDate = new Date();
+
+function getBudgetMonthRange(date) {
+    const start = new Date(date.getFullYear(), date.getMonth(), 1);
+    const end = new Date(date.getFullYear(), date.getMonth() + 1, 1);
+    return { start, end };
+}
+
+function changeBudgetMonth(delta) {
+    budgetCurrentDate.setMonth(budgetCurrentDate.getMonth() + delta);
+    renderPage('budget');
+}
+
+function jumpToCurrentBudgetMonth() {
+    budgetCurrentDate = new Date();
+    renderPage('budget');
+}
+
 function renderBudget(container) {
-    const totalIncome = store.budgetEntries
+    const { start, end } = getBudgetMonthRange(budgetCurrentDate);
+    const selectedLabel = budgetCurrentDate.toLocaleDateString('en-US', {
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'America/Chicago'
+    });
+
+    const monthEntries = store.budgetEntries.filter((entry) => {
+        const dateSource = entry.due_date || entry.created_at;
+        if (!dateSource) return false;
+        const d = new Date(dateSource);
+        return d >= start && d < end;
+    });
+
+    const monthTransactions = store.transactions.filter((t) => {
+        if (!t.created_at) return false;
+        const d = new Date(t.created_at);
+        return d >= start && d < end;
+    });
+
+    const totalIncome = monthEntries
         .filter(e => e.entry_type === 'income')
         .reduce((sum, e) => sum + parseFloat(e.amount), 0);
-    const totalExpenses = store.budgetEntries
+    const totalExpenses = monthEntries
         .filter(e => e.entry_type === 'expense')
         .reduce((sum, e) => sum + parseFloat(e.amount), 0);
     const balance = totalIncome - totalExpenses;
@@ -4728,15 +4828,20 @@ function renderBudget(container) {
             </div>
             
             <div style="display:flex;gap:8px;margin-bottom:20px;">
+                <button class="btn btn-ghost" onclick="changeBudgetMonth(-1)">← Prev Month</button>
+                <button class="btn btn-ghost" onclick="jumpToCurrentBudgetMonth()">Current Month</button>
+                <button class="btn btn-ghost" onclick="changeBudgetMonth(1)">Next Month →</button>
                 <button class="btn btn-primary" onclick="showAddBudgetModal()">+ Add Entry</button>
             </div>
+
+            <div style="margin:-8px 0 14px;font-size:0.95rem;color:var(--text-muted);">Showing: ${selectedLabel}</div>
             
             <div class="card">
                 <div class="card-header">
                     <div class="card-title">📋 Budget Entries</div>
                 </div>
                 <div class="list-container">
-                    ${store.budgetEntries.map(entry => {
+                    ${monthEntries.map(entry => {
                         const isIncome = entry.entry_type === 'income';
                         return `
                             <div class="list-item">
@@ -4753,7 +4858,7 @@ function renderBudget(container) {
                                 </div>
                             </div>
                         `;
-                    }).join('') || '<div class="list-item"><div class="text-center" style="width:100%;color:var(--text-muted);">No budget entries</div></div>'}
+                    }).join('') || '<div class="list-item"><div class="text-center" style="width:100%;color:var(--text-muted);">No budget entries for this month</div></div>'}
                 </div>
             </div>
             
@@ -4762,7 +4867,7 @@ function renderBudget(container) {
                     <div class="card-title">📝 Recent Transactions</div>
                 </div>
                 <div class="list-container">
-                    ${store.transactions.map(t => `
+                    ${monthTransactions.map(t => `
                         <div class="list-item">
                             <div class="list-content">
                                 <div class="list-title">${t.description || 'Transaction'}</div>
@@ -4774,7 +4879,7 @@ function renderBudget(container) {
                                 </div>
                             </div>
                         </div>
-                    `).join('') || '<div class="list-item"><div class="text-center" style="width:100%;color:var(--text-muted);">No transactions</div></div>'}
+                    `).join('') || '<div class="list-item"><div class="text-center" style="width:100%;color:var(--text-muted);">No transactions for this month</div></div>'}
                 </div>
             </div>
         </div>
