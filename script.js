@@ -5466,5 +5466,79 @@ function getPointsToNextLevel(currentPoints) {
     return nextLevelPoints - currentPoints;
 }
 
+// ==================== SIDEBAR TOGGLE (WebView Compatible) ====================
+function setupSidebarToggle() {
+    const sidebar = document.getElementById('sidebar');
+    const menuBtn = document.getElementById('mobileMenuBtn');
+    const backdrop = document.getElementById('sidebarBackdrop');
+    const sidebarLogo = document.getElementById('sidebarLogo');
+
+    if (!sidebar || !menuBtn) return;
+
+    let lastToggle = 0;
+
+    function doToggle() {
+        const now = Date.now();
+        if (now - lastToggle < 200) return; // debounce 200ms
+        lastToggle = now;
+        sidebar.classList.toggle('open');
+    }
+
+    function doClose() {
+        sidebar.classList.remove('open');
+    }
+
+    // Click handler (works on desktop + most mobile browsers)
+    menuBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        doToggle();
+    });
+
+    // Touch handler for WebView APKs (fires immediately, no 300ms delay)
+    menuBtn.addEventListener('touchend', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        doToggle();
+    });
+
+    // Sidebar logo closes menu
+    if (sidebarLogo) {
+        sidebarLogo.addEventListener('click', function(e) {
+            e.preventDefault();
+            doClose();
+        });
+        sidebarLogo.addEventListener('touchend', function(e) {
+            e.preventDefault();
+            doClose();
+        });
+    }
+
+    // Backdrop closes menu
+    if (backdrop) {
+        backdrop.addEventListener('click', function(e) {
+            e.preventDefault();
+            doClose();
+        });
+        backdrop.addEventListener('touchend', function(e) {
+            e.preventDefault();
+            doClose();
+        });
+    }
+
+    // Nav items close menu after navigation
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+        item.addEventListener('click', function() {
+            setTimeout(doClose, 50);
+        });
+        item.addEventListener('touchend', function() {
+            setTimeout(doClose, 50);
+        });
+    });
+}
+
 // ==================== INIT ====================
-document.addEventListener('DOMContentLoaded', initApp);
+document.addEventListener('DOMContentLoaded', function() {
+    setupSidebarToggle();
+    initApp();
+});

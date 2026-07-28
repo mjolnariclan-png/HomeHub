@@ -2105,7 +2105,47 @@ body::before {
     }
 }
 
-/* ==================== MOBILE HEADER BRANDING ==================== */
+/* ==================== WEBVIEW TOUCH FIXES ==================== */
+.mobile-menu-btn,
+.nav-item,
+.btn,
+.checkbox,
+.room-tab,
+.view-tab,
+.recipe-header,
+.calendar-day,
+.list-item,
+.store-item,
+.dashboard-card-btn {
+    cursor: pointer;
+    -webkit-tap-highlight-color: rgba(242, 140, 40, 0.2);
+    touch-action: manipulation;
+}
+
+.mobile-menu-btn {
+    -webkit-appearance: none;
+    appearance: none;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 1.6rem;
+    padding: 8px;
+    min-width: 48px;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: 8px;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.mobile-menu-btn:active {
+    background: rgba(242, 140, 40, 0.15);
+}
+
+/* Mobile brand */
 .mobile-brand {
     display: none;
     align-items: center;
@@ -2131,6 +2171,20 @@ body::before {
     white-space: nowrap;
 }
 
+/* Sidebar backdrop */
+.sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 999;
+}
+
+.sidebar.open ~ .sidebar-backdrop,
+.sidebar-backdrop.active {
+    display: block;
+}
+
 @media (max-width: 1024px) {
     .mobile-brand {
         display: flex;
@@ -2141,19 +2195,10 @@ body::before {
     .mobile-brand {
         display: none !important;
     }
-}
-
-/* Sidebar backdrop */
-.sidebar-backdrop {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.6);
-    z-index: 999;
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
-}
-
-.sidebar.open ~ .sidebar-backdrop {
-    display: block;
+    .mobile-menu-btn {
+        display: none !important;
+    }
+    .sidebar-backdrop {
+        display: none !important;
+    }
 }

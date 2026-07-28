@@ -54,7 +54,7 @@
         <!-- Sidebar -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <div class="logo" onclick="toggleSidebar()" style="cursor:pointer;" title="Tap to Close Menu">
+                <div class="logo" id="sidebarLogo" style="cursor:pointer;" title="Tap to Close Menu">
                     <img src="logo.png" style="width:100%;height:100%;object-fit:contain;">
                 </div>
                 <div class="sidebar-title">Family Hub</div>
@@ -113,17 +113,13 @@
                 </div>
             </div>
         </aside>
-        <div class="sidebar-backdrop" onclick="document.getElementById('sidebar').classList.remove('open')"></div>
+        <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
         <!-- Main Content -->
         <main class="main-content">
             <header class="top-header">
-                <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1;">
-                    <button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
-                    <div class="mobile-brand">
-                        <div class="mobile-brand-logo"></div>
-                        <span class="mobile-brand-name">Family Hub</span>
-                    </div>
+                <div style="display:flex;align-items:center;gap:16px;">
+                    <button class="mobile-menu-btn" id="mobileMenuBtn">☰</button>
                     <h1 class="page-title" id="pageTitle">Dashboard</h1>
                 </div>
                 <div class="header-actions">
