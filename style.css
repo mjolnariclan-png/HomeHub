@@ -37,6 +37,7 @@
 
 html,
 body {
+    height: 100%;
     width: 100%;
     max-width: 100%;
     overflow-x: hidden;
@@ -96,7 +97,7 @@ body {
         radial-gradient(circle at 88% 10%, rgba(242, 140, 40, 0.2) 0%, transparent 46%),
         linear-gradient(145deg, rgba(24, 13, 9, 0.95), rgba(11, 9, 8, 0.95));
     color: var(--text);
-    overflow-x: hidden;
+    overflow: hidden;
 }
 
 body::after {

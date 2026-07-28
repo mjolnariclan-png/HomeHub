@@ -727,18 +727,33 @@ function toggleSidebar() {
 function setupPullToRefreshBlocker() {
     let touchStartY = 0;
 
-    document.addEventListener('touchstart', (event) => {
+    const findScrollableAncestor = (node) => {
+        let current = node;
+        while (current && current !== document.body) {
+            if (current instanceof HTMLElement) {
+                const style = window.getComputedStyle(current);
+                const canScroll = /(auto|scroll)/.test(style.overflowY);
+                if (canScroll && current.scrollHeight > current.clientHeight) {
+                    return current;
+                }
+            }
+            current = current.parentElement;
+        }
+        return document.querySelector('.content-area') || document.scrollingElement;
+    };
+
+    window.addEventListener('touchstart', (event) => {
         if (!event.touches?.length) return;
         touchStartY = event.touches[0].clientY;
-    }, { passive: true });
+    }, { passive: true, capture: true });
 
-    document.addEventListener('touchmove', (event) => {
+    window.addEventListener('touchmove', (event) => {
         if (!event.touches?.length) return;
         const currentY = event.touches[0].clientY;
         const deltaY = currentY - touchStartY;
         if (deltaY <= 0) return;
 
-        const scroller = document.querySelector('.content-area');
+        const scroller = findScrollableAncestor(event.target);
         if (!scroller) {
             event.preventDefault();
             return;
@@ -747,7 +762,7 @@ function setupPullToRefreshBlocker() {
         if (scroller.scrollTop <= 0) {
             event.preventDefault();
         }
-    }, { passive: false });
+    }, { passive: false, capture: true });
 }
 
 function applyAddPermissionVisibility() {
