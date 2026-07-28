@@ -34,6 +34,11 @@ Export tips:
 - Try to keep each background under ~1.5 MB for faster loading
 - Avoid tiny text in background art (it can look blurry on mobile)
 
+Personal profile uploads:
+- Each user can now upload their own profile picture and personal background in Admin & Profile.
+- These personal uploads are saved per account on the current device/browser.
+- Global Viking theme files above still control the default look for everyone.
+
 If you prefer different filenames, edit the CSS variables in style.css:
 - --viking-main-image
 - --viking-auth-image

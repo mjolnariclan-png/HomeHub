@@ -94,6 +94,176 @@ function toggleTabletMode(enabled) {
     renderPage('admin');
 }
 
+// ==================== PROFILE PERSONALIZATION ====================
+function getAvatarStorageKey(userId = store.user?.id) {
+    return userId ? `homehub_avatar_${userId}` : null;
+}
+
+function getBackgroundStorageKey(userId = store.user?.id) {
+    return userId ? `homehub_bg_${userId}` : null;
+}
+
+function getStoredImage(key) {
+    if (!key) return null;
+    return localStorage.getItem(key);
+}
+
+function setStoredImage(key, value) {
+    if (!key) return false;
+    try {
+        localStorage.setItem(key, value);
+        return true;
+    } catch (err) {
+        console.error('Image save failed:', err);
+        alert('Image is too large for local storage on this device. Please use a smaller PNG.');
+        return false;
+    }
+}
+
+function getStoredProfileAvatar(userId = store.user?.id) {
+    const key = getAvatarStorageKey(userId);
+    return getStoredImage(key);
+}
+
+function getStoredProfileBackground(userId = store.user?.id) {
+    const key = getBackgroundStorageKey(userId);
+    return getStoredImage(key);
+}
+
+function getAvatarInlineStyle(userId) {
+    const avatar = getStoredProfileAvatar(userId);
+    if (avatar) {
+        return `background-image:url('${avatar}');background-size:cover;background-position:center;background-color:transparent;`;
+    }
+    return `background:${getUserColorHex(userId)};`;
+}
+
+function updateSidebarAvatar() {
+    const avatarEl = document.getElementById('userAvatar');
+    if (!avatarEl || !store.user) return;
+
+    const displayName = store.user.display_name || store.user.username || 'U';
+    const avatar = getStoredProfileAvatar(store.user.id);
+
+    if (avatar) {
+        avatarEl.style.background = 'transparent';
+        avatarEl.innerHTML = `<img class="avatar-img" src="${avatar}" alt="${displayName}">`;
+    } else {
+        avatarEl.innerHTML = '';
+        avatarEl.style.background = getUserColorHex(store.user.id);
+        avatarEl.textContent = displayName.substring(0, 2).toUpperCase();
+    }
+}
+
+function applyCurrentUserTheme() {
+    const root = document.documentElement;
+    const bg = getStoredProfileBackground(store.user?.id);
+    if (bg) {
+        root.style.setProperty('--active-main-bg', `url('${bg}')`);
+        root.style.setProperty('--active-main-bg-size', '100% auto');
+    } else {
+        root.style.setProperty('--active-main-bg', 'var(--viking-main-image)');
+        root.style.setProperty('--active-main-bg-size', 'cover');
+    }
+
+    updateSidebarAvatar();
+}
+
+function readImageFile(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+function loadImage(dataUrl) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = dataUrl;
+    });
+}
+
+async function resizeImageForStorage(file, maxWidth, maxHeight, cropSquare = false) {
+    const dataUrl = await readImageFile(file);
+    const img = await loadImage(dataUrl);
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    if (cropSquare) {
+        const side = Math.min(img.width, img.height);
+        const sx = Math.floor((img.width - side) / 2);
+        const sy = Math.floor((img.height - side) / 2);
+        const target = Math.min(maxWidth, maxHeight);
+
+        canvas.width = target;
+        canvas.height = target;
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, target, target);
+    } else {
+        const scale = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
+    }
+
+    return canvas.toDataURL('image/png');
+}
+
+async function uploadMyAvatar(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.includes('png')) {
+        alert('Please upload a PNG image for your avatar.');
+        return;
+    }
+
+    const avatarData = await resizeImageForStorage(file, 512, 512, true);
+    const key = getAvatarStorageKey(store.user?.id);
+    if (!setStoredImage(key, avatarData)) return;
+
+    applyCurrentUserTheme();
+    renderPage('admin');
+}
+
+async function uploadMyBackground(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.includes('png')) {
+        alert('Please upload a PNG image for your background.');
+        return;
+    }
+
+    const bgData = await resizeImageForStorage(file, 1920, 1080, false);
+    const key = getBackgroundStorageKey(store.user?.id);
+    if (!setStoredImage(key, bgData)) return;
+
+    applyCurrentUserTheme();
+    renderPage('admin');
+}
+
+function removeMyAvatar() {
+    const key = getAvatarStorageKey(store.user?.id);
+    if (key) localStorage.removeItem(key);
+    applyCurrentUserTheme();
+    renderPage('admin');
+}
+
+function removeMyBackground() {
+    const key = getBackgroundStorageKey(store.user?.id);
+    if (key) localStorage.removeItem(key);
+    applyCurrentUserTheme();
+    renderPage('admin');
+}
+
 function getUserColor(userId) {
     // Handle Supabase joined object: { id, display_name, username }
     if (userId && typeof userId === 'object') {
@@ -642,13 +812,10 @@ async function bootstrapUser(userId) {
     const displayName = profile.display_name || profile.username;
 
     document.getElementById('userName').textContent = displayName;
-    document.getElementById('userAvatar').textContent =
-        displayName.substring(0, 2).toUpperCase();
-
-    document.getElementById('userAvatar').style.background =
-        getUserColorHex(profile.id);
+    updateSidebarAvatar();
 
     document.getElementById('userRole').textContent = profile.role;
+    applyCurrentUserTheme();
 
     await loadFamilyData()
     setupRealtimeSubscriptions()
@@ -4517,6 +4684,8 @@ async function submitStoreItem() {
 // ==================== RENDER: ADMIN ====================
 function renderAdmin(container) {
     const isAdmin = hasHouseholdControlAccess();
+    const myName = store.user?.display_name || store.user?.username || 'U';
+    const myAvatar = getStoredProfileAvatar(store.user?.id);
     
     container.innerHTML = `
         <div class="fade-in">
@@ -4527,13 +4696,25 @@ function renderAdmin(container) {
                         <div class="card-title">👤 Your Profile</div>
                     </div>
                     <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;">
-                        <div class="avatar" style="background:${getUserColorHex(store.user?.id)};width:64px;height:64px;font-size:1.5rem;">
-                            ${(store.user?.display_name || store.user?.username || 'U').substring(0, 2).toUpperCase()}
+                        <div class="avatar" style="${myAvatar ? 'background:transparent;' : `background:${getUserColorHex(store.user?.id)};`}width:64px;height:64px;font-size:1.5rem;">
+                            ${myAvatar ? `<img class="avatar-img" src="${myAvatar}" alt="${myName}">` : myName.substring(0, 2).toUpperCase()}
                         </div>
                         <div>
                             <div style="font-size:1.25rem;font-weight:700;">${store.user?.display_name || store.user?.username}</div>
                             <div style="color:var(--text-muted);text-transform:capitalize;">${store.user?.role || 'User'}</div>
                         </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Profile Picture (PNG)</label>
+                        <input type="file" class="form-input" accept="image/png" onchange="uploadMyAvatar(event)">
+                        <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;">Recommended: square PNG, at least 512 x 512.</div>
+                        <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="removeMyAvatar()">Remove Profile Picture</button>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Personal Background (PNG)</label>
+                        <input type="file" class="form-input" accept="image/png" onchange="uploadMyBackground(event)">
+                        <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;">Recommended: 1920 x 1080 PNG.</div>
+                        <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="removeMyBackground()">Reset Background</button>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Display Name</label>
@@ -4588,8 +4769,8 @@ function renderAdmin(container) {
                     <div class="list-container">
                         ${store.familyMembers.map(m => `
                             <div class="list-item">
-                                <div class="avatar" style="background:${getUserColorHex(m.id)};width:40px;height:40px;">
-                                    ${(m.display_name || m.username).substring(0, 2).toUpperCase()}
+                                <div class="avatar" style="${getStoredProfileAvatar(m.id) ? 'background:transparent;' : `background:${getUserColorHex(m.id)};`}width:40px;height:40px;">
+                                    ${getStoredProfileAvatar(m.id) ? `<img class="avatar-img" src="${getStoredProfileAvatar(m.id)}" alt="${m.display_name || m.username}">` : (m.display_name || m.username).substring(0, 2).toUpperCase()}
                                 </div>
                                 <div class="list-content">
                                     <div class="list-title">${m.display_name || m.username}</div>
@@ -4634,7 +4815,7 @@ async function updateProfile() {
     
     store.user.display_name = displayName;
     document.getElementById('userName').textContent = displayName;
-    document.getElementById('userAvatar').textContent = displayName.substring(0, 2).toUpperCase();
+    updateSidebarAvatar();
     alert('Profile updated!');
 }
 
