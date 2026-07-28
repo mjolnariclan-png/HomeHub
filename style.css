@@ -197,6 +197,7 @@ body::after {
     font-family: 'Cinzel', 'Times New Roman', serif;
     letter-spacing: 0.04em;
     background: linear-gradient(90deg, #ffb267, #d14f2e, #ff8f3f);
+    background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }
@@ -2168,6 +2169,7 @@ body::before {
     font-size: 1rem;
     font-weight: 700;
     background: linear-gradient(90deg, #ffb267, #d14f2e, #ff8f3f);
+    background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     white-space: nowrap;
