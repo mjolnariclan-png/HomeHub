@@ -2110,7 +2110,7 @@ body::before {
     display: none;
     align-items: center;
     gap: 10px;
-    margin-right: auto;
+    flex-shrink: 0;
 }
 
 .mobile-brand-logo {
@@ -2143,7 +2143,7 @@ body::before {
     }
 }
 
-/* Ensure sidebar backdrop works */
+/* Sidebar backdrop */
 .sidebar-backdrop {
     display: none;
     position: fixed;
@@ -2154,20 +2154,6 @@ body::before {
     -webkit-backdrop-filter: blur(2px);
 }
 
-.sidebar.open ~ .sidebar-backdrop,
-.sidebar-backdrop.active {
+.sidebar.open ~ .sidebar-backdrop {
     display: block;
-}
-
-/* Fix app-container display on mobile when inline style is set */
-@media (max-width: 768px) {
-    .app-container {
-        display: flex !important;
-        flex-direction: column;
-    }
-
-    .main-content {
-        flex: 1;
-        min-height: 0;
-    }
 }
