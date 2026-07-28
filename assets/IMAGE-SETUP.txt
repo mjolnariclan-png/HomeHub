@@ -1,0 +1,40 @@
+HomeHub Viking Theme Image Setup
+
+Drop your custom images in this folder with these names:
+
+1) viking-main.png
+Used as the subtle global background texture behind the app.
+Recommended size: 2560 x 1440 (16:9)
+Good minimum: 1920 x 1080
+
+2) viking-auth.png
+Used behind the login/signup screen.
+Recommended size: 1920 x 1080
+Good minimum: 1600 x 900
+
+3) viking-sidebar.png
+Used behind the sidebar navigation area.
+Recommended size: 1024 x 2048 (portrait)
+Good minimum: 768 x 1536
+
+Optional branding images in project root:
+- logo.png (sidebar/app logo)
+- favicon.png (browser tab icon)
+- icon-192.png and icon-512.png (PWA app icons)
+
+Recommended branding sizes:
+- logo.png: 512 x 512 with transparent background
+- favicon.png: 64 x 64
+- icon-192.png: exactly 192 x 192
+- icon-512.png: exactly 512 x 512
+
+Export tips:
+- Keep all files as PNG
+- Use sRGB color profile
+- Try to keep each background under ~1.5 MB for faster loading
+- Avoid tiny text in background art (it can look blurry on mobile)
+
+If you prefer different filenames, edit the CSS variables in style.css:
+- --viking-main-image
+- --viking-auth-image
+- --viking-sidebar-image

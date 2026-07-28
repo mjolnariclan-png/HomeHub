@@ -1,31 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;800&family=Almendra:wght@400;700&display=swap');
+
 :root {
-    --primary: #6366f1;
-    --primary-dark: #4f46e5;
-    --secondary: #ec4899;
-    --bg: #0f172a;
-    --surface: #1e293b;
-    --surface-light: #334155;
-    --text: #f1f5f9;
-    --text-muted: #94a3b8;
-    --success: #22c55e;
-    --warning: #f59e0b;
-    --danger: #ef4444;
+    --primary: #b1351d;
+    --primary-dark: #7e2112;
+    --secondary: #f28c28;
+    --bg: #120f0d;
+    --surface: #1f1612;
+    --surface-light: #3a2720;
+    --text: #f6ead9;
+    --text-muted: #c9ac89;
+    --success: #7cb342;
+    --warning: #ff9800;
+    --danger: #e53935;
+    --ember-glow: rgba(242, 140, 40, 0.35);
+    --steel-shadow: rgba(0, 0, 0, 0.5);
+
+    /* Replace these with your own images when ready */
+    --viking-auth-image: url('assets/viking-auth.png');
+    --viking-sidebar-image: url('assets/viking-sidebar.png');
+    --viking-main-image: url('assets/viking-main.png');
+
     --sidebar-width: 260px;
     --header-height: 64px;
     
     /* Family member colors */
-    --color-mom: #4c00ff;
-    --color-dad: #00f815;
-    --color-jaxon: #3b82f6;
-    --color-peyton: #ec4899;
-    --color-default: #6366f1;
+    --color-mom: #ff7043;
+    --color-dad: #ef5350;
+    --color-jaxon: #ffb74d;
+    --color-peyton: #ff8a65;
+    --color-default: #d97706;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-    background: var(--bg);
+    font-family: 'Almendra', 'Georgia', serif;
+    background:
+        radial-gradient(circle at 12% 16%, rgba(180, 53, 29, 0.22) 0%, transparent 48%),
+        radial-gradient(circle at 88% 10%, rgba(242, 140, 40, 0.2) 0%, transparent 46%),
+        linear-gradient(145deg, rgba(24, 13, 9, 0.95), rgba(11, 9, 8, 0.95)),
+        var(--viking-main-image) center/cover no-repeat;
     color: var(--text);
     overflow: hidden;
 }
@@ -35,7 +49,9 @@ body {
 .auth-screen {
     position: fixed;
     inset: 0;
-    background: var(--bg);
+    background:
+        linear-gradient(160deg, rgba(8, 5, 4, 0.86), rgba(16, 10, 8, 0.9)),
+        var(--viking-auth-image) center/cover no-repeat;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -44,12 +60,19 @@ body {
 
 .auth-box {
     background: var(--surface);
-    border: 1px solid var(--surface-light);
+    border: 1px solid #6d3f2f;
     border-radius: 16px;
     padding: 40px;
     width: 100%;
     max-width: 400px;
     text-align: center;
+    box-shadow: 0 14px 34px var(--steel-shadow), inset 0 0 0 1px rgba(242, 140, 40, 0.15);
+}
+
+.auth-box h2 {
+    font-family: 'Cinzel', 'Times New Roman', serif;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
 }
 
 .auth-buttons {
@@ -67,8 +90,10 @@ body {
 /* ==================== SIDEBAR ==================== */
 .sidebar {
     width: var(--sidebar-width);
-    background: var(--surface);
-    border-right: 1px solid var(--surface-light);
+    background:
+        linear-gradient(180deg, rgba(31, 22, 18, 0.95), rgba(18, 14, 12, 0.95)),
+        var(--viking-sidebar-image) center/cover no-repeat;
+    border-right: 1px solid #6d3f2f;
     display: flex;
     flex-direction: column;
     transition: transform 0.3s ease;
@@ -92,7 +117,9 @@ body {
 .sidebar-title {
     font-size: 1.25rem;
     font-weight: 700;
-    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    font-family: 'Cinzel', 'Times New Roman', serif;
+    letter-spacing: 0.04em;
+    background: linear-gradient(90deg, #ffb267, #d14f2e, #ff8f3f);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }
@@ -126,9 +153,9 @@ body {
 }
 
 .nav-item.active {
-    background: linear-gradient(90deg, rgba(99, 102, 241, 0.15), rgba(236, 72, 153, 0.15));
-    color: var(--primary);
-    border-left: 3px solid var(--primary);
+    background: linear-gradient(90deg, rgba(209, 79, 46, 0.25), rgba(242, 140, 40, 0.18));
+    color: #ffd6a5;
+    border-left: 3px solid var(--secondary);
 }
 
 .nav-icon {
@@ -199,8 +226,8 @@ body {
 
 .top-header {
     height: var(--header-height);
-    background: var(--surface);
-    border-bottom: 1px solid var(--surface-light);
+    background: linear-gradient(180deg, rgba(31, 22, 18, 0.96), rgba(25, 19, 16, 0.96));
+    border-bottom: 1px solid #6d3f2f;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -210,6 +237,8 @@ body {
 .page-title {
     font-size: 1.5rem;
     font-weight: 700;
+    font-family: 'Cinzel', 'Times New Roman', serif;
+    letter-spacing: 0.04em;
 }
 
 .header-actions {
@@ -240,14 +269,15 @@ body {
 }
 
 .btn-primary {
-    background: var(--primary);
+    background: linear-gradient(135deg, #c64628, #8e2514);
     color: white;
+    border: 1px solid rgba(255, 180, 102, 0.25);
 }
 
 .btn-primary:hover {
-    background: var(--primary-dark);
+    background: linear-gradient(135deg, #d7522f, #a12d18);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(9, 255, 0, 0.3);
+    box-shadow: 0 6px 16px var(--ember-glow);
 }
 
 .btn-ghost {
@@ -257,7 +287,7 @@ body {
 }
 
 .btn-ghost:hover {
-    background: var(--surface-light);
+    background: rgba(242, 140, 40, 0.12);
     color: var(--text);
 }
 
@@ -280,16 +310,23 @@ body {
 /* ==================== CARDS ==================== */
 .card {
     background: var(--surface);
-    border: 1px solid var(--surface-light);
+    border: 1px solid #5b3528;
     border-radius: 12px;
     padding: 20px;
     transition: transform 0.2s, box-shadow 0.2s;
     overflow: visible;
+    box-shadow: inset 0 0 0 1px rgba(255, 165, 80, 0.08);
+}
+
+.card-title,
+.modal-header h3 {
+    font-family: 'Cinzel', 'Times New Roman', serif;
+    letter-spacing: 0.03em;
 }
 
 .card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 10px 28px var(--steel-shadow), 0 0 0 1px rgba(255, 145, 80, 0.18);
 }
 
 .card-header {
@@ -368,6 +405,26 @@ body {
 
 .list-item:hover {
     background: rgba(255, 255, 255, 0.02);
+}
+
+.list-item {
+    position: relative;
+}
+
+.list-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 10px;
+    bottom: 10px;
+    width: 2px;
+    background: linear-gradient(180deg, rgba(242, 140, 40, 0.12), rgba(177, 53, 29, 0.7), rgba(242, 140, 40, 0.12));
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.list-item:hover::before {
+    opacity: 1;
 }
 
 .list-item.completed {
@@ -500,6 +557,14 @@ body {
     max-width: 500px;
     max-height: 90vh;
     overflow-y: auto;
+    box-shadow: 0 18px 34px var(--steel-shadow), inset 0 0 0 1px rgba(242, 140, 40, 0.12);
+}
+
+.modal-header {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: linear-gradient(180deg, rgba(33, 23, 18, 0.98), rgba(30, 22, 18, 0.96));
 }
 
 .modal-header {
@@ -634,7 +699,7 @@ body {
 }
 
 .calendar-day.today {
-    background: rgba(99, 102, 241, 0.1);
+    background: rgba(242, 140, 40, 0.16);
 }
 
 .calendar-day-number {
@@ -644,7 +709,7 @@ body {
 }
 
 .calendar-day.today .calendar-day-number {
-    color: var(--primary);
+    color: #ffb267;
     font-weight: 700;
 }
 
@@ -697,7 +762,7 @@ body {
 
 .progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    background: linear-gradient(90deg, #c64528, #f28c28);
     border-radius: 4px;
     transition: width 0.5s ease;
 }
@@ -752,10 +817,74 @@ body {
     transform: translateY(-4px);
 }
 
+.sidebar::after,
+.top-header::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(242, 140, 40, 0.55), transparent);
+}
+
+.sidebar,
+.top-header {
+    position: relative;
+}
+
+.nav-item,
+.btn,
+.card,
+.store-item,
+.modal-content {
+    border-radius: 10px;
+}
+
+.btn,
+.nav-item {
+    letter-spacing: 0.02em;
+}
+
+.btn-primary,
+.view-tab.active,
+.nav-item.active {
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
+}
+
+/* Subtle ember motion for atmosphere */
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(circle at 15% 82%, rgba(255, 157, 60, 0.07) 0%, transparent 28%),
+        radial-gradient(circle at 80% 25%, rgba(209, 79, 46, 0.08) 0%, transparent 32%),
+        radial-gradient(circle at 58% 64%, rgba(255, 125, 40, 0.05) 0%, transparent 30%);
+    animation: emberDrift 14s ease-in-out infinite alternate;
+    z-index: 0;
+}
+
+.app-container,
+.auth-screen {
+    position: relative;
+    z-index: 1;
+}
+
+@keyframes emberDrift {
+    0% {
+        transform: translateY(0px) scale(1);
+    }
+    100% {
+        transform: translateY(-8px) scale(1.02);
+    }
+}
+
 .store-price {
     font-size: 1.5rem;
     font-weight: 700;
-    color: var(--primary);
+    color: #ffb267;
     margin: 12px 0;
 }
 

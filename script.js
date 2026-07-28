@@ -1278,82 +1278,20 @@ async function addChore(title, description, value, points, category, room, recur
 async function completeChore(choreId) {
     // TABLET MODE: Skip approval, just mark done and award immediately
     if (isTabletMode()) {
-        // Show a simple name picker
-        const memberNames = store.familyMembers.map(m => 
-            `${m.id}:${m.display_name || m.username}`
-        ).join(',');
-        
-        const selectedId = prompt(
-            `Who completed this chore?\n\n${store.familyMembers.map(m => `• ${m.display_name || m.username}`).join('\n')}\n\nType the exact name:`
-        );
-        
-        if (!selectedId) return; // cancelled
-        
-        const member = store.familyMembers.find(m => 
-            (m.display_name || m.username).toLowerCase() === selectedId.trim().toLowerCase()
-        );
-        
-        if (!member) {
-            alert('Name not found. Please type the exact name shown.');
-            return;
-        }
-        
-        const chore = store.chores.find(c => c.id === choreId) || store.allFamilyChores.find(c => c.id === choreId);
-        if (!chore) return;
-        
-        // Award points/money immediately with level multiplier
-        const level = member.level || 1;
-        const multiplier = parseFloat(getLevelMultiplier(level));
-        const finalPoints = Math.round((chore.points || 0) * multiplier);
-        const finalValue = parseFloat((chore.value || 0) * multiplier);
-        
-        const newPoints = (member.points || 0) + finalPoints;
-        const newBalance = (member.balance || 0) + finalValue;
-        const newLevel = getLevelFromPoints(newPoints);
-        
-        // Update member profile
-        const { error: profileError } = await supabaseClient
-            .from('profiles')
-            .update({
-                points: newPoints,
-                balance: newBalance,
-                level: newLevel
-            })
-            .eq('id', member.id);
-        
-        if (profileError) {
-            alert('Error awarding points: ' + profileError.message);
-            return;
-        }
-        
-        // Update chore last_completed_at so cooldown starts
-        await supabaseClient
-            .from('chores')
-            .update({ last_completed_at: new Date().toISOString() })
-            .eq('id', choreId);
-        
-        // Optional: Log it for tracking
-        await supabaseClient.from('chore_completions').insert({
-            chore_id: choreId,
-            completed_by: member.id,
-            status: 'approved', // auto-approved
-            approved_by: store.user.id,
-            approved_at: new Date().toISOString()
-        });
-        
-        // Refresh and show
-        await loadFamilyData();
-        renderPage('chores');
-        
-        // Toast instead of alert
-        showToast({
-            icon: '✅',
-            title: 'Chore Completed!',
-            body: `${member.display_name || member.username} earned ${finalPoints} pts and $${finalValue.toFixed(2)}`,
-            type: 'chore',
-            deepLink: 'chores'
-        });
-        
+        const memberOptions = store.familyMembers.map(m =>
+            `<option value="${m.id}">${m.display_name || m.username}</option>`
+        ).join('');
+
+        showModal('Who completed this chore?', `
+            <div class="form-group">
+                <label class="form-label">Family Member</label>
+                <select id="tabletCompletedBy" class="form-select">
+                    <option value="">Select a name...</option>
+                    ${memberOptions}
+                </select>
+            </div>
+            <button class="btn btn-primary w-full" onclick="submitTabletChoreCompletion('${choreId}')">Confirm Completion</button>
+        `);
         return;
     }
     
@@ -1369,6 +1307,78 @@ async function completeChore(choreId) {
     alert('Chore submitted for approval!');
     await loadChores();
     renderPage('chores');
+}
+
+async function submitTabletChoreCompletion(choreId) {
+    const selectedMemberId = document.getElementById('tabletCompletedBy')?.value;
+    if (!selectedMemberId) {
+        alert('Please choose a family member.');
+        return;
+    }
+
+    const member = store.familyMembers.find(m => m.id === selectedMemberId);
+    if (!member) {
+        alert('Selected family member was not found.');
+        return;
+    }
+
+    closeModal();
+
+    const chore = store.chores.find(c => c.id === choreId) || store.allFamilyChores.find(c => c.id === choreId);
+    if (!chore) return;
+
+    // Award points/money immediately with level multiplier
+    const level = member.level || 1;
+    const multiplier = parseFloat(getLevelMultiplier(level));
+    const finalPoints = Math.round((chore.points || 0) * multiplier);
+    const finalValue = parseFloat((chore.value || 0) * multiplier);
+
+    const newPoints = (member.points || 0) + finalPoints;
+    const newBalance = (member.balance || 0) + finalValue;
+    const newLevel = getLevelFromPoints(newPoints);
+
+    // Update member profile
+    const { error: profileError } = await supabaseClient
+        .from('profiles')
+        .update({
+            points: newPoints,
+            balance: newBalance,
+            level: newLevel
+        })
+        .eq('id', member.id);
+
+    if (profileError) {
+        alert('Error awarding points: ' + profileError.message);
+        return;
+    }
+
+    // Update chore last_completed_at so cooldown starts
+    await supabaseClient
+        .from('chores')
+        .update({ last_completed_at: new Date().toISOString() })
+        .eq('id', choreId);
+
+    // Optional: Log it for tracking
+    await supabaseClient.from('chore_completions').insert({
+        chore_id: choreId,
+        completed_by: member.id,
+        status: 'approved', // auto-approved
+        approved_by: store.user.id,
+        approved_at: new Date().toISOString()
+    });
+
+    // Refresh and show
+    await loadFamilyData();
+    renderPage('chores');
+
+    // Toast instead of alert
+    showToast({
+        icon: '✅',
+        title: 'Chore Completed!',
+        body: `${member.display_name || member.username} earned ${finalPoints} pts and $${finalValue.toFixed(2)}`,
+        type: 'chore',
+        deepLink: 'chores'
+    });
 }
 
 
