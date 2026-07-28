@@ -41,7 +41,7 @@ body {
     width: 100%;
     max-width: 100%;
     overflow-x: hidden;
-    overscroll-behavior-y: none;
+    overscroll-behavior: none;
 }
 
 body.ui-size-compact {
@@ -159,6 +159,8 @@ body::after {
     height: 100dvh;
     min-height: 100dvh;
     overflow-x: hidden;
+    overflow-y: hidden;
+    overscroll-behavior: none;
 }
 
 .mobile-menu-btn {
@@ -312,6 +314,7 @@ body::after {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    overscroll-behavior: none;
 }
 
 .top-header {
@@ -341,7 +344,8 @@ body::after {
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    overscroll-behavior-y: contain;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     padding: 24px;
 }
 

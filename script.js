@@ -742,9 +742,33 @@ function setupPullToRefreshBlocker() {
         return document.querySelector('.content-area') || document.scrollingElement;
     };
 
+    const guardTopEdge = () => {
+        const scroller = document.querySelector('.content-area');
+        if (!scroller) return;
+
+        // Keep away from absolute top so native pull-to-refresh never arms.
+        if (scroller.scrollTop <= 0) {
+            scroller.scrollTop = 1;
+        }
+    };
+
+    // Never allow the document itself to become scrollable/offset.
+    window.scrollTo(0, 0);
+    window.addEventListener('scroll', () => {
+        if (window.scrollY !== 0) window.scrollTo(0, 0);
+    }, { passive: true });
+
+    guardTopEdge();
+    window.addEventListener('resize', guardTopEdge, { passive: true });
+
     window.addEventListener('touchstart', (event) => {
         if (!event.touches?.length) return;
         touchStartY = event.touches[0].clientY;
+
+        const scroller = findScrollableAncestor(event.target);
+        if (scroller && scroller.classList?.contains('content-area') && scroller.scrollTop <= 0) {
+            scroller.scrollTop = 1;
+        }
     }, { passive: true, capture: true });
 
     window.addEventListener('touchmove', (event) => {
@@ -761,8 +785,18 @@ function setupPullToRefreshBlocker() {
 
         if (scroller.scrollTop <= 0) {
             event.preventDefault();
+            if (scroller instanceof HTMLElement) scroller.scrollTop = 1;
         }
     }, { passive: false, capture: true });
+
+    const contentArea = document.querySelector('.content-area');
+    if (contentArea) {
+        contentArea.addEventListener('scroll', () => {
+            if (contentArea.scrollTop <= 0) {
+                contentArea.scrollTop = 1;
+            }
+        }, { passive: true });
+    }
 }
 
 function applyAddPermissionVisibility() {
