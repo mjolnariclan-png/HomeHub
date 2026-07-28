@@ -15,6 +15,9 @@ const MEDIA_BUCKET = 'homehub-media';
 const MEDIA_AVATAR_PREFIX = 'avatars';
 const MEDIA_BACKGROUND_PREFIX = 'backgrounds';
 const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 30;
+const DISPLAY_SIZE_OPTIONS = ['compact', 'normal', 'large'];
+
+let bootstrapInProgressUserId = null;
 
 // ==================== STORE ====================
 const store = {
@@ -37,8 +40,11 @@ const store = {
     storeItems: [],
     selectedPendingCompletions: [],
     userMedia: {},
+    displayPrefs: { size: 'normal', cardMode: 'surface' },
+    cardBackgrounds: {},
     loading: {},
     channels: {},
+    notificationChannels: {},
     currentPage: 'login'
 };
 
@@ -142,6 +148,153 @@ function getBackgroundStorageKey(userId = store.user?.id) {
     return userId ? `homehub_bg_${userId}` : null;
 }
 
+function getDisplayPrefsStorageKey(userId = store.user?.id) {
+    return userId ? `homehub_display_prefs_${userId}` : null;
+}
+
+function getCardBackgroundsStorageKey(userId = store.user?.id) {
+    return userId ? `homehub_card_backgrounds_${userId}` : null;
+}
+
+function loadUserDisplayPrefs(userId = store.user?.id) {
+    const key = getDisplayPrefsStorageKey(userId);
+    if (!key) return;
+
+    try {
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : {};
+        const size = DISPLAY_SIZE_OPTIONS.includes(parsed?.size) ? parsed.size : 'normal';
+        const cardMode = parsed?.cardMode === 'image' ? 'image' : 'surface';
+        store.displayPrefs = { size, cardMode };
+    } catch (err) {
+        console.warn('Display prefs load failed:', err);
+        store.displayPrefs = { size: 'normal', cardMode: 'surface' };
+    }
+}
+
+function saveUserDisplayPrefs() {
+    const key = getDisplayPrefsStorageKey(store.user?.id);
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(store.displayPrefs || { size: 'normal', cardMode: 'surface' }));
+}
+
+function applyUserDisplayPrefs() {
+    const body = document.body;
+    if (!body) return;
+
+    body.classList.remove('ui-size-compact', 'ui-size-normal', 'ui-size-large', 'card-mode-image');
+
+    const size = DISPLAY_SIZE_OPTIONS.includes(store.displayPrefs?.size) ? store.displayPrefs.size : 'normal';
+    body.classList.add(`ui-size-${size}`);
+
+    if (store.displayPrefs?.cardMode === 'image') {
+        body.classList.add('card-mode-image');
+    }
+}
+
+function setDisplaySize(size) {
+    if (!DISPLAY_SIZE_OPTIONS.includes(size)) return;
+    store.displayPrefs.size = size;
+    saveUserDisplayPrefs();
+    applyUserDisplayPrefs();
+    renderPage(store.currentPage || 'dashboard');
+}
+
+function setCardMode(mode) {
+    store.displayPrefs.cardMode = mode === 'image' ? 'image' : 'surface';
+    saveUserDisplayPrefs();
+    applyUserDisplayPrefs();
+    renderPage(store.currentPage || 'dashboard');
+}
+
+function loadCardBackgrounds(userId = store.user?.id) {
+    const key = getCardBackgroundsStorageKey(userId);
+    if (!key) return;
+
+    try {
+        const raw = localStorage.getItem(key);
+        store.cardBackgrounds = raw ? JSON.parse(raw) : {};
+    } catch (err) {
+        console.warn('Card backgrounds load failed:', err);
+        store.cardBackgrounds = {};
+    }
+}
+
+function saveCardBackgrounds() {
+    const key = getCardBackgroundsStorageKey(store.user?.id);
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(store.cardBackgrounds || {}));
+}
+
+function getCardBackgroundStyle(cardKey) {
+    const img = store.cardBackgrounds?.[cardKey];
+    if (!img) return '';
+    return `background-image:linear-gradient(160deg, rgba(9,7,6,0.55), rgba(16,12,10,0.52)), url('${img}');background-size:cover;background-position:center;background-repeat:no-repeat;`;
+}
+
+async function uploadCardBlockImage(event, cardKey) {
+    const file = event?.target?.files?.[0];
+    if (!file || !cardKey) return;
+
+    if (file.type !== 'image/png') {
+        alert('Please upload a PNG image.');
+        return;
+    }
+
+    try {
+        const dataUrl = await readImageFile(file);
+        store.cardBackgrounds = store.cardBackgrounds || {};
+        store.cardBackgrounds[cardKey] = dataUrl;
+        saveCardBackgrounds();
+        renderPage(store.currentPage || 'dashboard');
+    } catch (err) {
+        console.error('Card image upload failed:', err);
+        alert('Could not load this image. Try a smaller PNG.');
+    }
+}
+
+function removeCardBlockImage(cardKey) {
+    if (!cardKey || !store.cardBackgrounds?.[cardKey]) return;
+    delete store.cardBackgrounds[cardKey];
+    saveCardBackgrounds();
+    renderPage(store.currentPage || 'dashboard');
+}
+
+function getCardBlockOptions() {
+    return [
+        { key: 'dashboard_points', label: 'Dashboard - Points' },
+        { key: 'dashboard_balance', label: 'Dashboard - Balance' },
+        { key: 'dashboard_level', label: 'Dashboard - Level' },
+        { key: 'dashboard_todos', label: 'Dashboard - To-Dos' },
+        { key: 'dashboard_chores', label: 'Dashboard - Chores' },
+        { key: 'dashboard_budget', label: 'Dashboard - Budget' },
+        { key: 'dashboard_family', label: 'Dashboard - Family Members' },
+        { key: 'admin_profile', label: 'Profile - Your Profile Card' },
+        { key: 'admin_family', label: 'Profile - Family Card' },
+        { key: 'admin_members', label: 'Profile - Family Members Card' }
+    ];
+}
+
+function uploadCardImageForSelectedBlock(event) {
+    const select = document.getElementById('cardImageTarget');
+    const key = select?.value;
+    if (!key) {
+        alert('Select a block first.');
+        return;
+    }
+    uploadCardBlockImage(event, key);
+}
+
+function removeSelectedCardImage() {
+    const select = document.getElementById('cardImageTarget');
+    const key = select?.value;
+    if (!key) {
+        alert('Select a block first.');
+        return;
+    }
+    removeCardBlockImage(key);
+}
+
 function getStoredImage(key) {
     if (!key) return null;
     return localStorage.getItem(key);
@@ -179,12 +332,17 @@ function getAvatarInlineStyle(userId) {
     return `background:${getUserColorHex(userId)};`;
 }
 
+function getAvatarImgFallbackOnError(userId) {
+    const safeColor = getUserColorHex(userId).replace(/'/g, '');
+    return `this.onerror=null;this.remove();if(this.parentElement){this.parentElement.style.background='${safeColor}';}`;
+}
+
 function renderAvatarMarkup(userId, displayName, size = 40) {
     const name = displayName || 'U';
     const avatar = getStoredProfileAvatar(userId);
     const style = `${avatar ? 'background:transparent;' : `background:${getUserColorHex(userId)};`}width:${size}px;height:${size}px;${size <= 24 ? 'font-size:0.7rem;' : ''}`;
 
-    return `<div class="avatar" style="${style}">${avatar ? `<img class="avatar-img" src="${avatar}" alt="${name}">` : name.substring(0, 2).toUpperCase()}</div>`;
+    return `<div class="avatar" style="${style}">${avatar ? `<img class="avatar-img" src="${avatar}" alt="${name}" onerror="${getAvatarImgFallbackOnError(userId)}">` : name.substring(0, 2).toUpperCase()}</div>`;
 }
 
 function updateSidebarAvatar() {
@@ -197,7 +355,7 @@ function updateSidebarAvatar() {
     if (avatar) {
         avatarEl.style.backgroundImage = 'none';
         avatarEl.style.background = 'transparent';
-        avatarEl.innerHTML = `<img class="avatar-img" src="${avatar}" alt="${displayName}">`;
+        avatarEl.innerHTML = `<img class="avatar-img" src="${avatar}" alt="${displayName}" onerror="${getAvatarImgFallbackOnError(store.user.id)}">`;
     } else {
         avatarEl.innerHTML = '';
         avatarEl.style.backgroundImage = 'none';
@@ -206,8 +364,27 @@ function updateSidebarAvatar() {
     }
 }
 
+async function mediaObjectExists(path) {
+    if (!path || !supabaseClient) return false;
+
+    const slashIndex = path.lastIndexOf('/');
+    const folder = slashIndex >= 0 ? path.slice(0, slashIndex) : '';
+    const fileName = slashIndex >= 0 ? path.slice(slashIndex + 1) : path;
+
+    const { data, error } = await supabaseClient
+        .storage
+        .from(MEDIA_BUCKET)
+        .list(folder, { search: fileName, limit: 20 });
+
+    if (error || !Array.isArray(data)) return false;
+    return data.some((entry) => entry?.name === fileName);
+}
+
 async function getSignedMediaUrl(path) {
     if (!path || !supabaseClient) return null;
+
+    const exists = await mediaObjectExists(path);
+    if (!exists) return null;
 
     const { data, error } = await supabaseClient
         .storage
@@ -263,6 +440,7 @@ function applyCurrentUserTheme() {
     }
 
     updateSidebarAvatar();
+    applyUserDisplayPrefs();
 }
 
 function readImageFile(file) {
@@ -523,8 +701,25 @@ function toggleSidebar() {
 // ==================== NOTIFICATION STORE ====================
 store.notifications = []
 
+function teardownNotificationSubscriptions() {
+    Object.values(store.notificationChannels || {}).forEach((ch) => {
+        try {
+            supabaseClient.removeChannel(ch)
+        } catch (err) {
+            try {
+                ch.unsubscribe()
+            } catch (_) {}
+        }
+    })
+    store.notificationChannels = {}
+}
+
 // ==================== NOTIFICATION SETUP ====================
 function setupNotificationSubscriptions() {
+    if (!store.user?.family_id) return
+
+    teardownNotificationSubscriptions()
+
   const tables = [
     { table: 'chore_completions', type: 'chore', icon: '🧹', title: 'Chore Completed' },
     { table: 'transactions', type: 'store', icon: '🛍️', title: 'Store Purchase' },
@@ -533,9 +728,9 @@ function setupNotificationSubscriptions() {
   ]
 
   tables.forEach(({ table, type, icon, title }) => {
-    supabaseClient
-      .channel(`${table}-notify`)
-      .on('postgres_changes', {
+        const channel = supabaseClient.channel(`${table}-notify-${store.user.id}`)
+
+        channel.on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: table,
@@ -578,7 +773,9 @@ function setupNotificationSubscriptions() {
           read: false
         })
       })
-      .subscribe()
+
+        channel.subscribe()
+        store.notificationChannels[table] = channel
   })
 }
 
@@ -799,6 +996,8 @@ async function initApp() {
     supabaseClient.auth.onAuthStateChange(async (event, session) => {
         console.log('Auth state change:', event, session?.user?.id);
         if (event === 'SIGNED_IN' && session) {
+            if (bootstrapInProgressUserId === session.user.id) return;
+            if (store.user?.id === session.user.id) return;
             await bootstrapUser(session.user.id);
         }
         if (event === 'SIGNED_OUT') {
@@ -950,6 +1149,15 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('modeJoin').addEventListener('click', () => setSignupMode('join'));
 });
 async function bootstrapUser(userId) {
+    if (!userId) return;
+    if (bootstrapInProgressUserId === userId) return;
+
+    const appVisible = document.querySelector('.app-container')?.style.display === 'flex';
+    if (store.user?.id === userId && appVisible) return;
+
+    bootstrapInProgressUserId = userId;
+
+    try {
 
     const profile = await loadUserProfile(userId);
 
@@ -968,6 +1176,8 @@ async function bootstrapUser(userId) {
     store.user = profile;
     store.family = null;
     store.userMedia = {};
+    loadUserDisplayPrefs(userId);
+    loadCardBackgrounds(userId);
 
     // Load family once (if exists)
     if (profile.family_id) {
@@ -999,6 +1209,9 @@ async function bootstrapUser(userId) {
     setupNotificationSubscriptions()
     showApp()
     navigateTo('dashboard')
+    } finally {
+        bootstrapInProgressUserId = null;
+    }
 }
 
 async function loadUserProfile(userId) {
@@ -1061,6 +1274,7 @@ async function logout() {
     store.family = null;
     Object.values(store.channels).forEach(ch => ch.unsubscribe());
     store.channels = {};
+    teardownNotificationSubscriptions();
     location.reload();
 }
 
@@ -2071,33 +2285,33 @@ function renderDashboard(container) {
     container.innerHTML = `
         <div class="fade-in">
             <div class="dashboard-grid">
-                <div class="card dashboard-card-btn" onclick="navigateTo('leaderboard')">
+                <div class="card dashboard-card-btn" style="${getCardBackgroundStyle('dashboard_points')}" onclick="navigateTo('leaderboard')">
                     <div class="card-title" style="color:var(--primary);">⭐ Points</div>
                     <div class="stat-value" style="color:var(--primary);">${store.user?.points || 0}</div>
                     <div class="stat-label">Your total points</div>
                 </div>
-                <div class="card dashboard-card-btn" onclick="navigateTo('store')">
+                <div class="card dashboard-card-btn" style="${getCardBackgroundStyle('dashboard_balance')}" onclick="navigateTo('store')">
                     <div class="card-title" style="color:var(--success);">💰 Balance</div>
                     <div class="stat-value" style="color:var(--success);">$${(store.user?.balance || 0).toFixed(2)}</div>
                     <div class="stat-label">Your chore earnings</div>
                 </div>
-                <div class="card dashboard-card-btn" onclick="navigateTo('leaderboard')">
+                <div class="card dashboard-card-btn" style="${getCardBackgroundStyle('dashboard_level')}" onclick="navigateTo('leaderboard')">
                     <div class="card-title" style="color:var(--warning);">🏆 Level ${store.user?.level || 1}</div>
                     <div class="stat-value" style="color:var(--warning);">${getLevelMultiplier(store.user?.level || 1)}x</div>
                     <div class="stat-label">Point & money multiplier</div>
                 </div>
-                <div class="card dashboard-card-btn" onclick="navigateTo('todo')">
+                <div class="card dashboard-card-btn" style="${getCardBackgroundStyle('dashboard_todos')}" onclick="navigateTo('todo')">
                     <div class="card-title" style="color:var(--secondary);">📋 To-Dos</div>
                     <div class="stat-value" style="color:var(--secondary);">${store.todos.length}</div>
                     <div class="stat-label">Pending tasks</div>
                 </div>
-                <div class="card dashboard-card-btn" onclick="navigateTo('chores')">
+                <div class="card dashboard-card-btn" style="${getCardBackgroundStyle('dashboard_chores')}" onclick="navigateTo('chores')">
                     <div class="card-title" style="color:var(--danger);">🧹 Chores</div>
                     <div class="stat-value" style="color:var(--danger);">${store.chores.length}</div>
                     <div class="stat-label">Available chores</div>
                 </div>
                 ${childView ? '' : `
-                <div class="card dashboard-card-btn" onclick="navigateTo('budget')">
+                <div class="card dashboard-card-btn" style="${getCardBackgroundStyle('dashboard_budget')}" onclick="navigateTo('budget')">
                     <div class="card-title" style="color:var(--text-muted);">💵 Budget</div>
                     <div class="stat-value" style="color:${balance >= 0 ? 'var(--success)' : 'var(--danger)'};">$${balance.toFixed(2)}</div>
                     <div class="stat-label">Monthly balance</div>
@@ -2105,7 +2319,7 @@ function renderDashboard(container) {
                 `}
             </div>
             
-            <div class="card" style="margin-top:20px;">
+            <div class="card" style="margin-top:20px;${getCardBackgroundStyle('dashboard_family')}">
                 <div class="card-header">
                     <div class="card-title">👥 Family Members</div>
                 </div>
@@ -5029,12 +5243,13 @@ function renderAdmin(container) {
     const isAdmin = hasHouseholdControlAccess();
     const myName = store.user?.display_name || store.user?.username || 'U';
     const myAvatar = getStoredProfileAvatar(store.user?.id);
+    const cardOptions = getCardBlockOptions();
     
     container.innerHTML = `
         <div class="fade-in">
-            <div class="dashboard-grid" style="grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));">
+            <div class="dashboard-grid admin-grid">
                 <!-- Profile Card -->
-                <div class="card">
+                <div class="card" style="${getCardBackgroundStyle('admin_profile')}">
                     <div class="card-header">
                         <div class="card-title">👤 Your Profile</div>
                     </div>
@@ -5082,11 +5297,36 @@ function renderAdmin(container) {
                             </div>
                         </div>
                     ` : ''}
+                    <div class="form-group" style="margin:10px 0 14px;">
+                        <label class="form-label">Display Size</label>
+                        <select class="form-select" onchange="setDisplaySize(this.value)">
+                            <option value="compact" ${store.displayPrefs?.size === 'compact' ? 'selected' : ''}>Compact</option>
+                            <option value="normal" ${store.displayPrefs?.size !== 'compact' && store.displayPrefs?.size !== 'large' ? 'selected' : ''}>Normal</option>
+                            <option value="large" ${store.displayPrefs?.size === 'large' ? 'selected' : ''}>Large</option>
+                        </select>
+                        <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;">Use this to resize layout for phone/tablet readability.</div>
+                    </div>
+                    <div class="form-group" style="margin:10px 0 14px;">
+                        <label class="form-label">Card Style Mode</label>
+                        <select class="form-select" onchange="setCardMode(this.value)">
+                            <option value="surface" ${store.displayPrefs?.cardMode !== 'image' ? 'selected' : ''}>Surface Cards</option>
+                            <option value="image" ${store.displayPrefs?.cardMode === 'image' ? 'selected' : ''}>Background-Only Cards</option>
+                        </select>
+                        <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;">Background-Only keeps your image visible behind content blocks.</div>
+                    </div>
+                    <div class="form-group" style="margin:10px 0 14px;">
+                        <label class="form-label">Block Background Images (PNG)</label>
+                        <select class="form-select" id="cardImageTarget" style="margin-bottom:8px;">
+                            ${cardOptions.map(opt => `<option value="${opt.key}">${opt.label}</option>`).join('')}
+                        </select>
+                        <input type="file" class="form-input" accept="image/png" onchange="uploadCardImageForSelectedBlock(event)">
+                        <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="removeSelectedCardImage()">Remove Selected Block Image</button>
+                    </div>
                     <button class="btn btn-primary w-full" onclick="updateProfile()">Update Profile</button>
                 </div>
                 
                 <!-- Family Card -->
-                <div class="card">
+                <div class="card" style="${getCardBackgroundStyle('admin_family')}">
                     <div class="card-header">
                         <div class="card-title">👨‍👩‍👧‍👦 Family</div>
                     </div>
@@ -5105,7 +5345,7 @@ function renderAdmin(container) {
                 </div>
                 
                 <!-- Users Card -->
-                <div class="card" style="grid-column:1 / -1;">
+                <div class="card" style="grid-column:1 / -1;${getCardBackgroundStyle('admin_members')}">
                     <div class="card-header">
                         <div class="card-title">👥 Family Members</div>
                     </div>
@@ -5225,6 +5465,18 @@ function getPointsToNextLevel(currentPoints) {
     const nextLevelPoints = getPointsForLevel(currentLevel + 1);
     return nextLevelPoints - currentPoints;
 }
+
+// Toggle sidebar
+document.querySelector('.mobile-menu-btn').addEventListener('click', () => {
+    document.querySelector('.sidebar').classList.toggle('open');
+});
+
+// Close sidebar when tapping backdrop or a nav item
+document.querySelectorAll('.sidebar-backdrop, .nav-item').forEach(el => {
+    el.addEventListener('click', () => {
+        document.querySelector('.sidebar').classList.remove('open');
+    });
+});
 
 // ==================== INIT ====================
 document.addEventListener('DOMContentLoaded', initApp);
