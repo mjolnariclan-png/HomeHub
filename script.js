@@ -81,6 +81,17 @@ function hasHouseholdControlAccess(user = store.user) {
     return role === 'admin' || role === 'parent' || role === 'adult';
 }
 
+function canAddItems(user = store.user) {
+    const role = (user?.role || '').toLowerCase();
+    return role === 'admin' || role === 'parent';
+}
+
+function requireAddPermission() {
+    if (canAddItems()) return true;
+    alert('Only Admins and Parents can add new items.');
+    return false;
+}
+
 function isChildAccount(user = store.user) {
     const role = (user?.role || '').toLowerCase();
     return role === 'user' || role === 'child';
@@ -686,14 +697,64 @@ function navigateTo(page) {
     // Show/hide add button per page
     const addBtn = document.getElementById('addBtn');
     const noAddPages = ['dashboard', 'leaderboard', 'admin'];
-    addBtn.style.display = noAddPages.includes(page) ? 'none' : 'inline-flex';
+    addBtn.style.display = (!canAddItems() || noAddPages.includes(page)) ? 'none' : 'inline-flex';
     
     renderPage(page);
     document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebarBackdrop')?.classList.remove('active');
 }
 
 function toggleSidebar() {
-    document.getElementById('sidebar').classList.toggle('open');
+    const sidebar = document.getElementById('sidebar');
+    if (!sidebar) return;
+
+    let backdrop = document.getElementById('sidebarBackdrop');
+    if (!backdrop) {
+        backdrop = document.createElement('div');
+        backdrop.id = 'sidebarBackdrop';
+        backdrop.className = 'sidebar-backdrop';
+        backdrop.addEventListener('click', () => {
+            sidebar.classList.remove('open');
+            backdrop.classList.remove('active');
+        });
+        document.body.appendChild(backdrop);
+    }
+
+    const isOpen = sidebar.classList.toggle('open');
+    backdrop.classList.toggle('active', isOpen);
+}
+
+function setupPullToRefreshBlocker() {
+    let touchStartY = 0;
+
+    document.addEventListener('touchstart', (event) => {
+        if (!event.touches?.length) return;
+        touchStartY = event.touches[0].clientY;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', (event) => {
+        if (!event.touches?.length) return;
+        const currentY = event.touches[0].clientY;
+        const deltaY = currentY - touchStartY;
+        if (deltaY <= 0) return;
+
+        const scroller = document.querySelector('.content-area');
+        if (!scroller) {
+            event.preventDefault();
+            return;
+        }
+
+        if (scroller.scrollTop <= 0) {
+            event.preventDefault();
+        }
+    }, { passive: false });
+}
+
+function applyAddPermissionVisibility() {
+    const canAdd = canAddItems();
+    document.querySelectorAll('button[onclick*="showAdd"]').forEach((btn) => {
+        btn.style.display = canAdd ? '' : 'none';
+    });
 }
 
 
@@ -943,6 +1004,8 @@ function renderPage(page) {
         case 'admin': renderAdmin(container); break;
         default: renderDashboard(container);
     }
+
+    applyAddPermissionVisibility();
 }
 
 function refreshData() {
@@ -968,6 +1031,8 @@ function closeModal(e) {
 }
 
 function showAddModal() {
+    if (!requireAddPermission()) return;
+
     const page = store.currentPage;
     switch(page) {
         case 'todo': showAddTodoModal(); break;
@@ -982,6 +1047,8 @@ function showAddModal() {
 
 // ==================== AUTH ====================
 async function initApp() {
+    setupPullToRefreshBlocker();
+
     if (!supabaseClient) {
         document.getElementById('contentArea').innerHTML = '<div style="text-align:center;padding:60px;"><h2 style="color:var(--danger)">Connection Error</h2></div>';
         return;
@@ -2592,6 +2659,8 @@ function groupByRoom(choreList) {
     return grouped;
 }
 function showAddTodoModal() {
+    if (!requireAddPermission()) return;
+
     const memberOptions = store.familyMembers.map(m => 
         `<option value="${m.id}">${m.display_name || m.username}</option>`
     ).join('');
@@ -2776,6 +2845,8 @@ function renderShopping(container) {
 }
 
 function showAddShoppingModal() {
+    if (!requireAddPermission()) return;
+
     showModal('Add Shopping Item', `
         <div class="form-group">
             <label class="form-label">Item Name *</label>
@@ -3509,6 +3580,8 @@ function switchAdminView(viewName) {
 
 
 function showAddChoreModal() {
+    if (!requireAddPermission()) return;
+
     const memberOptions = store.familyMembers.map(m => 
         `<option value="${m.id}">${m.display_name || m.username}</option>`
     ).join('');
@@ -3994,6 +4067,8 @@ function parseIngredients(ingredientsJson) {
 }
 
 function showAddRecipeModal() {
+    if (!requireAddPermission()) return;
+
     const ingredientOptions = store.sharedIngredients.map(ing => 
         `<option value="${ing.name}">${ing.name}</option>`
     ).join('');
@@ -4693,6 +4768,8 @@ function showDayEvents(year, month, day) {
 }
 
 function showAddEventModal(prefillDate = null) {
+    if (!requireAddPermission()) return;
+
     const memberOptions = store.familyMembers.map(m => 
         `<option value="${m.id}">${m.display_name || m.username}</option>`
     ).join('');
@@ -5101,6 +5178,8 @@ function renderBudget(container) {
 }
 
 function showAddBudgetModal() {
+    if (!requireAddPermission()) return;
+
     showModal('Add Budget Entry', `
         <div class="form-group">
             <label class="form-label">Title *</label>
@@ -5210,6 +5289,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 function showAddStoreItemModal() {
+    if (!requireAddPermission()) return;
+
     showModal('Add Store Item', `
         <div class="form-group">
             <label class="form-label">Item Name *</label>

@@ -40,6 +40,7 @@ body {
     width: 100%;
     max-width: 100%;
     overflow-x: hidden;
+    overscroll-behavior-y: none;
 }
 
 body.ui-size-compact {
@@ -338,6 +339,7 @@ body::after {
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
+    overscroll-behavior-y: contain;
     padding: 24px;
 }
 
@@ -2026,8 +2028,8 @@ body::before {
     }
 }
 
-/* ---------- TABLETS (769px - 1024px) ---------- */
-@media (min-width: 769px) and (max-width: 1024px) {
+/* ---------- TABLETS (769px - 1280px) ---------- */
+@media (min-width: 769px) and (max-width: 1280px) {
     .sidebar {
         position: fixed;
         left: 0;
@@ -2088,8 +2090,8 @@ body::before {
     }
 }
 
-/* ---------- DESKTOP (1025px+) ---------- */
-@media (min-width: 1025px) {
+/* ---------- DESKTOP (1281px+) ---------- */
+@media (min-width: 1281px) {
     .mobile-menu-btn {
         display: none !important;
     }
@@ -2185,13 +2187,13 @@ body::before {
     display: block;
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1280px) {
     .mobile-brand {
         display: flex;
     }
 }
 
-@media (min-width: 1025px) {
+@media (min-width: 1281px) {
     .mobile-brand {
         display: none !important;
     }
