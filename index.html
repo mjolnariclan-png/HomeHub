@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="style.css">
     <link rel="icon" type="image/png" href="favicon.png">
     <link rel="manifest" href="/manifest.json">
+<base target="_blank">
 </head>
 <body>
     <div id="authScreen" class="auth-screen">
@@ -112,12 +113,17 @@
                 </div>
             </div>
         </aside>
+        <div class="sidebar-backdrop" onclick="toggleSidebar()"></div>
 
         <!-- Main Content -->
         <main class="main-content">
             <header class="top-header">
-                <div style="display:flex;align-items:center;gap:16px;">
+                <div style="display:flex;align-items:center;gap:16px;min-width:0;">
                     <button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
+                    <div class="mobile-brand">
+                        <div class="mobile-brand-logo"></div>
+                        <span class="mobile-brand-name">Family Hub</span>
+                    </div>
                     <h1 class="page-title" id="pageTitle">Dashboard</h1>
                 </div>
                 <div class="header-actions">

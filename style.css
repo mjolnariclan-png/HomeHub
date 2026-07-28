@@ -714,7 +714,7 @@ body::after {
     overflow: hidden;
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1024px) {
     .sidebar {
         position: fixed;
         left: 0;
@@ -2102,5 +2102,72 @@ body::before {
 
     .sidebar-backdrop {
         display: none !important;
+    }
+}
+
+/* ==================== MOBILE HEADER BRANDING ==================== */
+.mobile-brand {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    margin-right: auto;
+}
+
+.mobile-brand-logo {
+    width: 32px;
+    height: 32px;
+    background: url('logo.png') center/contain no-repeat;
+    border-radius: 6px;
+    flex-shrink: 0;
+}
+
+.mobile-brand-name {
+    font-family: 'Cinzel', 'Times New Roman', serif;
+    font-size: 1rem;
+    font-weight: 700;
+    background: linear-gradient(90deg, #ffb267, #d14f2e, #ff8f3f);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    white-space: nowrap;
+}
+
+@media (max-width: 1024px) {
+    .mobile-brand {
+        display: flex;
+    }
+}
+
+@media (min-width: 1025px) {
+    .mobile-brand {
+        display: none !important;
+    }
+}
+
+/* Ensure sidebar backdrop works */
+.sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 999;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+}
+
+.sidebar.open ~ .sidebar-backdrop,
+.sidebar-backdrop.active {
+    display: block;
+}
+
+/* Fix app-container display on mobile when inline style is set */
+@media (max-width: 768px) {
+    .app-container {
+        display: flex !important;
+        flex-direction: column;
+    }
+
+    .main-content {
+        flex: 1;
+        min-height: 0;
     }
 }

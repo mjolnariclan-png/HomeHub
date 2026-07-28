@@ -5466,17 +5466,5 @@ function getPointsToNextLevel(currentPoints) {
     return nextLevelPoints - currentPoints;
 }
 
-// Toggle sidebar
-document.querySelector('.mobile-menu-btn').addEventListener('click', () => {
-    document.querySelector('.sidebar').classList.toggle('open');
-});
-
-// Close sidebar when tapping backdrop or a nav item
-document.querySelectorAll('.sidebar-backdrop, .nav-item').forEach(el => {
-    el.addEventListener('click', () => {
-        document.querySelector('.sidebar').classList.remove('open');
-    });
-});
-
 // ==================== INIT ====================
 document.addEventListener('DOMContentLoaded', initApp);
