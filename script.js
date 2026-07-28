@@ -63,8 +63,35 @@ function setSignupMode(mode) {
 
 
 // ==================== TABLET MODE ====================
+function hasHouseholdControlAccess(user = store.user) {
+    const role = (user?.role || '').toLowerCase();
+    return role === 'admin' || role === 'parent' || role === 'adult';
+}
+
+function getTabletModeStorageKey() {
+    return store.user?.id ? `homehub_tablet_mode_${store.user.id}` : 'homehub_tablet_mode';
+}
+
 function isTabletMode() {
+    if (!hasHouseholdControlAccess()) return false;
+
+    const saved = localStorage.getItem(getTabletModeStorageKey());
+    if (saved !== null) {
+        return saved === 'true';
+    }
+
+    // Legacy fallback for existing setup
     return store.user?.username === 'TabletAdmin' || store.user?.email === 'charactercreation9@gmail.com';
+}
+
+function setTabletMode(enabled) {
+    if (!hasHouseholdControlAccess()) return;
+    localStorage.setItem(getTabletModeStorageKey(), enabled ? 'true' : 'false');
+}
+
+function toggleTabletMode(enabled) {
+    setTabletMode(!!enabled);
+    renderPage('admin');
 }
 
 function getUserColor(userId) {
@@ -1178,7 +1205,7 @@ async function toggleTodo(todoId, completed) {
 }
 
 async function deleteTodo(todoId) {
-    const isAdmin = store.user?.role === 'admin' || store.user?.role === 'adult';
+    const isAdmin = hasHouseholdControlAccess();
     if (!isAdmin) { alert('Only adults/admins can delete to-dos.'); return; }
     if (!confirm('Delete this to-do?')) return;
     const { error } = await supabaseClient.from('todos').delete().eq('id', todoId).select();
@@ -1346,7 +1373,7 @@ async function completeChore(choreId) {
 
 
 async function approveChore(completionId, choreId, userId, points, value) {
-    const isAdmin = store.user?.role === 'admin' || store.user?.role === 'adult';
+    const isAdmin = hasHouseholdControlAccess();
     if (!isAdmin) { alert('Only parents/admins can approve chores.'); return; }
     
     // Step 1: Update completion status
@@ -1405,7 +1432,7 @@ async function approveChore(completionId, choreId, userId, points, value) {
 }
 
 async function rejectChore(completionId) {
-    const isAdmin = store.user?.role === 'admin' || store.user?.role === 'adult';
+    const isAdmin = hasHouseholdControlAccess();
     if (!isAdmin) { alert('Only parents/admins can reject chores.'); return; }
     
     const { error } = await supabaseClient
@@ -1645,7 +1672,7 @@ function renderTodo(container) {
         return;
     }
 
-    const isAdmin = store.user?.role === 'admin' || store.user?.role === 'parent';
+    const isAdmin = hasHouseholdControlAccess();
     const activeTodos = store.todos.filter(t => !t.completed);
 
     // Group todos by assigned person
@@ -1979,7 +2006,7 @@ function renderTodoSection(title, todos, canToggle) {
                                             <span>👤 ${getUserName(todo.assigned_to)}</span>
                                         </div>
                                     </div>
-                                    ${canToggle && (store.user?.role === 'admin' || store.user?.role === 'parent') ? `
+                                    ${canToggle && hasHouseholdControlAccess() ? `
                                         <button class="btn btn-ghost btn-sm" onclick="deleteTodo('${todo.id}')">🗑️</button>
                                     ` : ''}
                                 </div>
@@ -2236,7 +2263,7 @@ function renderChores(container) {
         return;
     }
 
-    const isAdmin = store.user?.role === 'admin' || store.user?.role === 'parent';
+    const isAdmin = hasHouseholdControlAccess();
     const isChild = !isAdmin;
 
 
@@ -2646,7 +2673,7 @@ async function submitEditChore(choreId) {
 }
 
 async function deleteChore(choreId) {
-    const isAdmin = store.user?.role === 'admin' || store.user?.role === 'parent';
+    const isAdmin = hasHouseholdControlAccess();
     if (!isAdmin) { alert('Only parents/admins can delete chores.'); return; }
     if (!confirm('Delete this chore? This will also remove any pending completions.')) return;
     
@@ -3885,7 +3912,7 @@ function renderCalendar(container) {
                             const color = getUserColorHex(event.assigned_to);
                             const dateStr = formatEventDate(event.start_time, event.event_type);
                             const timeStr = formatEventTime(event.start_time, event.event_type);
-                            const isAdmin = store.user?.role === 'admin' || store.user?.role === 'parent';
+                            const isAdmin = hasHouseholdControlAccess();
                             const canEdit = isAdmin || event.created_by === store.user?.id || event.assigned_to === store.user?.id;
                             return `
                                 <div class="list-item" style="flex-wrap:wrap;">
@@ -3940,7 +3967,7 @@ function showDayEvents(year, month, day) {
         return;
     }
     
-    const isAdmin = store.user?.role === 'admin' || store.user?.role === 'parent';
+    const isAdmin = hasHouseholdControlAccess();
     const canEdit = (e) => isAdmin || e.created_by === store.user?.id || e.assigned_to === store.user?.id;
     
     showModal(`Events for ${dateStr}`, `
@@ -4479,7 +4506,7 @@ async function submitStoreItem() {
 
 // ==================== RENDER: ADMIN ====================
 function renderAdmin(container) {
-    const isAdmin = store.user?.role === 'admin' || store.user?.role === 'parent';
+    const isAdmin = hasHouseholdControlAccess();
     
     container.innerHTML = `
         <div class="fade-in">
@@ -4510,6 +4537,17 @@ function renderAdmin(container) {
                         <label class="form-label">Role</label>
                         <input type="text" class="form-input" value="${store.user?.role || 'User'}" disabled style="opacity:0.5;text-transform:capitalize;">
                     </div>
+                    ${isAdmin ? `
+                        <div class="form-group" style="margin:8px 0 14px;">
+                            <label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                <input type="checkbox" ${isTabletMode() ? 'checked' : ''} onchange="toggleTabletMode(this.checked)">
+                                Household Control Mode (Tablet)
+                            </label>
+                            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:6px;line-height:1.4;">
+                                When enabled, this account can complete chores for any family member from one shared device.
+                            </div>
+                        </div>
+                    ` : ''}
                     <button class="btn btn-primary w-full" onclick="updateProfile()">Update Profile</button>
                 </div>
                 
@@ -4556,6 +4594,7 @@ function renderAdmin(container) {
                                     <select class="form-select" style="width:auto;" onchange="changeUserRole('${m.id}', this.value)">
                                         <option value="user" ${m.role === 'user' ? 'selected' : ''}>User</option>
                                         <option value="parent" ${m.role === 'parent' ? 'selected' : ''}>Parent</option>
+                                        <option value="adult" ${m.role === 'adult' ? 'selected' : ''}>Adult</option>
                                         <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Admin</option>
                                     </select>
                                 ` : ''}
