@@ -20,7 +20,7 @@
     --viking-sidebar-image: url('assets/viking-sidebar.png');
     --viking-main-image: url('assets/viking-main.png');
     --active-main-bg: var(--viking-main-image);
-    --active-main-bg-size: cover;
+    --active-main-bg-size: 100% 100%;
 
     --sidebar-width: 260px;
     --header-height: 64px;
@@ -70,6 +70,8 @@ body::after {
     justify-content: center;
     align-items: center;
     z-index: 9999;
+    background-size: cover, 100% 100%;
+    background-position: center, center;
 }
 
 .auth-box {

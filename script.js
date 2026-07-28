@@ -11,6 +11,11 @@ try {
     supabaseClient = null;
 }
 
+const MEDIA_BUCKET = 'homehub-media';
+const MEDIA_AVATAR_PREFIX = 'avatars';
+const MEDIA_BACKGROUND_PREFIX = 'backgrounds';
+const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 30;
+
 // ==================== STORE ====================
 const store = {
     user: null,
@@ -31,6 +36,7 @@ const store = {
     badges: [],
     storeItems: [],
     selectedPendingCompletions: [],
+    userMedia: {},
     loading: {},
     channels: {},
     currentPage: 'login'
@@ -96,6 +102,14 @@ function toggleTabletMode(enabled) {
 }
 
 // ==================== PROFILE PERSONALIZATION ====================
+function getAvatarStoragePath(userId = store.user?.id) {
+    return userId ? `${MEDIA_AVATAR_PREFIX}/${userId}.png` : null;
+}
+
+function getBackgroundStoragePath(userId = store.user?.id) {
+    return userId ? `${MEDIA_BACKGROUND_PREFIX}/${userId}.png` : null;
+}
+
 function getAvatarStorageKey(userId = store.user?.id) {
     return userId ? `homehub_avatar_${userId}` : null;
 }
@@ -113,6 +127,10 @@ function setStoredImage(key, value) {
     if (!key) return false;
     try {
         localStorage.setItem(key, value);
+        if (localStorage.getItem(key) !== value) {
+            alert('Image failed to save correctly. Please try a smaller PNG.');
+            return false;
+        }
         return true;
     } catch (err) {
         console.error('Image save failed:', err);
@@ -122,13 +140,11 @@ function setStoredImage(key, value) {
 }
 
 function getStoredProfileAvatar(userId = store.user?.id) {
-    const key = getAvatarStorageKey(userId);
-    return getStoredImage(key);
+    return store.userMedia?.[userId]?.avatarUrl || null;
 }
 
 function getStoredProfileBackground(userId = store.user?.id) {
-    const key = getBackgroundStorageKey(userId);
-    return getStoredImage(key);
+    return store.userMedia?.[userId]?.backgroundUrl || null;
 }
 
 function getAvatarInlineStyle(userId) {
@@ -147,13 +163,60 @@ function updateSidebarAvatar() {
     const avatar = getStoredProfileAvatar(store.user.id);
 
     if (avatar) {
+        avatarEl.style.backgroundImage = 'none';
         avatarEl.style.background = 'transparent';
         avatarEl.innerHTML = `<img class="avatar-img" src="${avatar}" alt="${displayName}">`;
     } else {
         avatarEl.innerHTML = '';
+        avatarEl.style.backgroundImage = 'none';
         avatarEl.style.background = getUserColorHex(store.user.id);
         avatarEl.textContent = displayName.substring(0, 2).toUpperCase();
     }
+}
+
+async function getSignedMediaUrl(path) {
+    if (!path || !supabaseClient) return null;
+
+    const { data, error } = await supabaseClient
+        .storage
+        .from(MEDIA_BUCKET)
+        .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+
+    if (error || !data?.signedUrl) return null;
+    return `${data.signedUrl}&v=${Date.now()}`;
+}
+
+async function refreshUserMedia(userId = store.user?.id) {
+    if (!userId || !supabaseClient) return;
+
+    const avatarPath = getAvatarStoragePath(userId);
+    const backgroundPath = getBackgroundStoragePath(userId);
+
+    const [avatarUrl, backgroundUrl] = await Promise.all([
+        getSignedMediaUrl(avatarPath),
+        getSignedMediaUrl(backgroundPath)
+    ]);
+
+    store.userMedia[userId] = {
+        avatarUrl: avatarUrl || null,
+        backgroundUrl: backgroundUrl || null,
+        updatedAt: Date.now()
+    };
+}
+
+async function preloadFamilyAvatarMedia() {
+    if (!supabaseClient || !Array.isArray(store.familyMembers)) return;
+
+    await Promise.all(store.familyMembers.map(async (member) => {
+        const userId = member?.id;
+        if (!userId) return;
+        if (!store.userMedia[userId]) store.userMedia[userId] = { avatarUrl: null, backgroundUrl: null, updatedAt: 0 };
+
+        const avatarPath = getAvatarStoragePath(userId);
+        const avatarUrl = await getSignedMediaUrl(avatarPath);
+        store.userMedia[userId].avatarUrl = avatarUrl || null;
+        store.userMedia[userId].updatedAt = Date.now();
+    }));
 }
 
 function applyCurrentUserTheme() {
@@ -161,10 +224,10 @@ function applyCurrentUserTheme() {
     const bg = getStoredProfileBackground(store.user?.id);
     if (bg) {
         root.style.setProperty('--active-main-bg', `url('${bg}')`);
-        root.style.setProperty('--active-main-bg-size', 'cover');
+        root.style.setProperty('--active-main-bg-size', '100% 100%');
     } else {
         root.style.setProperty('--active-main-bg', 'var(--viking-main-image)');
-        root.style.setProperty('--active-main-bg-size', 'cover');
+        root.style.setProperty('--active-main-bg-size', '100% 100%');
     }
 
     updateSidebarAvatar();
@@ -186,6 +249,16 @@ function loadImage(dataUrl) {
         img.onerror = reject;
         img.src = dataUrl;
     });
+}
+
+function dataUrlToBlob(dataUrl) {
+    const parts = dataUrl.split(',');
+    const mime = parts[0].match(/:(.*?);/)[1];
+    const binary = atob(parts[1]);
+    const length = binary.length;
+    const bytes = new Uint8Array(length);
+    for (let i = 0; i < length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
 }
 
 async function resizeImageForStorage(file, maxWidth, maxHeight, cropSquare = false) {
@@ -227,8 +300,28 @@ async function uploadMyAvatar(event) {
     }
 
     const avatarData = await resizeImageForStorage(file, 512, 512, true);
-    const key = getAvatarStorageKey(store.user?.id);
-    if (!setStoredImage(key, avatarData)) return;
+    const blob = dataUrlToBlob(avatarData);
+    const path = getAvatarStoragePath(store.user?.id);
+
+    const { error } = await supabaseClient
+        .storage
+        .from(MEDIA_BUCKET)
+        .upload(path, blob, {
+            upsert: true,
+            contentType: 'image/png',
+            cacheControl: '3600'
+        });
+
+    if (error) {
+        console.error('Avatar upload error:', error);
+        alert('Could not upload avatar to cloud storage. Check Supabase bucket and policies.');
+        return;
+    }
+
+    const localKey = getAvatarStorageKey(store.user?.id);
+    if (localKey) localStorage.removeItem(localKey);
+
+    await refreshUserMedia(store.user?.id);
 
     applyCurrentUserTheme();
     renderPage('admin');
@@ -243,24 +336,58 @@ async function uploadMyBackground(event) {
         return;
     }
 
-    const bgData = await resizeImageForStorage(file, 1600, 900, false);
-    const key = getBackgroundStorageKey(store.user?.id);
-    if (!setStoredImage(key, bgData)) return;
+    const bgData = await resizeImageForStorage(file, 1920, 1080, false);
+    const blob = dataUrlToBlob(bgData);
+    const path = getBackgroundStoragePath(store.user?.id);
+
+    const { error } = await supabaseClient
+        .storage
+        .from(MEDIA_BUCKET)
+        .upload(path, blob, {
+            upsert: true,
+            contentType: 'image/png',
+            cacheControl: '3600'
+        });
+
+    if (error) {
+        console.error('Background upload error:', error);
+        alert('Could not upload background to cloud storage. Check Supabase bucket and policies.');
+        return;
+    }
+
+    const localKey = getBackgroundStorageKey(store.user?.id);
+    if (localKey) localStorage.removeItem(localKey);
+
+    await refreshUserMedia(store.user?.id);
 
     applyCurrentUserTheme();
     renderPage('admin');
 }
 
-function removeMyAvatar() {
-    const key = getAvatarStorageKey(store.user?.id);
-    if (key) localStorage.removeItem(key);
+async function removeMyAvatar() {
+    const path = getAvatarStoragePath(store.user?.id);
+    if (path) {
+        await supabaseClient.storage.from(MEDIA_BUCKET).remove([path]);
+    }
+    const localKey = getAvatarStorageKey(store.user?.id);
+    if (localKey) localStorage.removeItem(localKey);
+    if (store.user?.id && store.userMedia[store.user.id]) {
+        store.userMedia[store.user.id].avatarUrl = null;
+    }
     applyCurrentUserTheme();
     renderPage('admin');
 }
 
-function removeMyBackground() {
-    const key = getBackgroundStorageKey(store.user?.id);
-    if (key) localStorage.removeItem(key);
+async function removeMyBackground() {
+    const path = getBackgroundStoragePath(store.user?.id);
+    if (path) {
+        await supabaseClient.storage.from(MEDIA_BUCKET).remove([path]);
+    }
+    const localKey = getBackgroundStorageKey(store.user?.id);
+    if (localKey) localStorage.removeItem(localKey);
+    if (store.user?.id && store.userMedia[store.user.id]) {
+        store.userMedia[store.user.id].backgroundUrl = null;
+    }
     applyCurrentUserTheme();
     renderPage('admin');
 }
@@ -320,6 +447,7 @@ function getUserName(userId) {
 // ==================== NAVIGATION ====================
 function navigateTo(page) {
     store.currentPage = page;
+    applyCurrentUserTheme();
     
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.toggle('active', item.dataset.page === page);
@@ -558,6 +686,7 @@ function timeAgo(dateString) {
 }
 
 function renderPage(page) {
+    applyCurrentUserTheme();
     const container = document.getElementById('contentArea');
     container.innerHTML = '';
     
@@ -795,6 +924,7 @@ async function bootstrapUser(userId) {
 
     store.user = profile;
     store.family = null;
+    store.userMedia = {};
 
     // Load family once (if exists)
     if (profile.family_id) {
@@ -811,6 +941,8 @@ async function bootstrapUser(userId) {
     }
 
     const displayName = profile.display_name || profile.username;
+
+    await refreshUserMedia(userId);
 
     document.getElementById('userName').textContent = displayName;
     updateSidebarAvatar();
@@ -897,6 +1029,8 @@ async function loadFamilyData() {
         .select('*')
         .eq('family_id', store.user.family_id);
     store.familyMembers = members || [];
+
+    await preloadFamilyAvatarMedia();
 
     await Promise.all([
         loadChores(),
