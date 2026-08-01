@@ -5596,77 +5596,57 @@ function getPointsToNextLevel(currentPoints) {
     return nextLevelPoints - currentPoints;
 }
 
-// ==================== SIDEBAR TOGGLE (WebView Compatible) ====================
 function setupSidebarToggle() {
     const sidebar = document.getElementById('sidebar');
-    const menuBtn = document.getElementById('mobileMenuBtn');
     const backdrop = document.getElementById('sidebarBackdrop');
-    const sidebarLogo = document.getElementById('sidebarLogo');
+    let touchStartX = 0;
+    let touchEndX = 0;
 
-    if (!sidebar || !menuBtn) return;
+    // Swipe from left edge to open
+    document.addEventListener('touchstart', (e) => {
+        touchStartX = e.changedTouches[0].clientX;
+    }, false);
 
-    let lastToggle = 0;
+    document.addEventListener('touchend', (e) => {
+        touchEndX = e.changedTouches[0].clientX;
+        handleSwipe();
+    }, false);
 
-    function doToggle() {
-        const now = Date.now();
-        if (now - lastToggle < 200) return; // debounce 200ms
-        lastToggle = now;
-        sidebar.classList.toggle('open');
-    }
+    function handleSwipe() {
+        const swipeThreshold = 50; // pixels
+        const diff = touchEndX - touchStartX;
 
-    function doClose() {
-        sidebar.classList.remove('open');
-    }
+        if (Math.abs(diff) < swipeThreshold) return;
 
-    // Click handler (works on desktop + most mobile browsers)
-    menuBtn.addEventListener('click', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        doToggle();
-    });
-
-    // Touch handler for WebView APKs (fires immediately, no 300ms delay)
-    menuBtn.addEventListener('touchend', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        doToggle();
-    });
-
-    // Sidebar logo closes menu
-    if (sidebarLogo) {
-        sidebarLogo.addEventListener('click', function(e) {
-            e.preventDefault();
-            doClose();
-        });
-        sidebarLogo.addEventListener('touchend', function(e) {
-            e.preventDefault();
-            doClose();
-        });
+        if (diff > swipeThreshold && touchStartX < 30) {
+            // Swiped right from left edge → open
+            sidebar.classList.add('open');
+            if (backdrop) backdrop.classList.add('active');
+        } else if (diff < -swipeThreshold) {
+            // Swiped left → close
+            sidebar.classList.remove('open');
+            if (backdrop) backdrop.classList.remove('active');
+        }
     }
 
     // Backdrop closes menu
     if (backdrop) {
-        backdrop.addEventListener('click', function(e) {
-            e.preventDefault();
-            doClose();
-        });
-        backdrop.addEventListener('touchend', function(e) {
-            e.preventDefault();
-            doClose();
+        backdrop.addEventListener('click', () => {
+            sidebar.classList.remove('open');
+            backdrop.classList.remove('active');
         });
     }
 
-    // Nav items close menu after navigation
-    document.querySelectorAll('.nav-item').forEach(function(item) {
-        item.addEventListener('click', function() {
-            setTimeout(doClose, 50);
-        });
-        item.addEventListener('touchend', function() {
-            setTimeout(doClose, 50);
+    // Nav items close menu
+    document.querySelectorAll('.nav-item').forEach((item) => {
+        item.addEventListener('click', () => {
+            setTimeout(() => {
+                sidebar.classList.remove('open');
+                if (backdrop) backdrop.classList.remove('active');
+            }, 50);
         });
     });
 }
-
 // ==================== INIT ====================
 document.addEventListener('DOMContentLoaded', function() {
     setupSidebarToggle();
