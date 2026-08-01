@@ -1448,8 +1448,13 @@ async function loadChores() {
         const bPending = store.pendingCompletions?.some(pc => 
             pc.chore_id === b.id && pc.completed_by === store.user?.id && pc.status === 'pending'
         );
-        const aAvailable = isChoreAvailable(a) && !aPending;
-        const bAvailable = isChoreAvailable(b) && !bPending;
+        
+        // Get the last completion for each chore (approved status = actually completed)
+        const aLastCompletion = store.pendingCompletions?.find(pc => pc.chore_id === a.id && pc.status === 'approved');
+        const bLastCompletion = store.pendingCompletions?.find(pc => pc.chore_id === b.id && pc.status === 'approved');
+        
+        const aAvailable = isChoreAvailable(a, aLastCompletion) && !aPending;
+        const bAvailable = isChoreAvailable(b, bLastCompletion) && !bPending;
 
         if (aAvailable && !bAvailable) return -1;
         if (!aAvailable && bAvailable) return 1;
@@ -5646,6 +5651,80 @@ function setupSidebarToggle() {
             }, 50);
         });
     });
+}
+
+
+/**
+ * Determine if a chore is available to be completed again based on its recurrence and last completion time.
+ * Resets happen at midnight (or on schedule boundaries), not relative to completion time.
+ */
+function isChoreAvailable(chore, lastCompletion) {
+  const now = new Date();
+  const recurrence = chore.recurrence || 'none';
+  
+  if (recurrence === 'none' || !lastCompletion) {
+    return true; // One-time or never completed — always available
+  }
+
+  const lastCompletedAt = new Date(lastCompletion.created_at);
+  
+  // Get today's date at midnight in the user's local timezone
+  const todayMidnight = new Date();
+  todayMidnight.setHours(0, 0, 0, 0);
+  
+  // Get last completion date at midnight
+  const lastCompletedMidnight = new Date(lastCompletedAt);
+  lastCompletedMidnight.setHours(0, 0, 0, 0);
+
+  switch (recurrence) {
+    case '24hr':
+      // Available if a new day has started (midnight has passed)
+      return now >= todayMidnight && lastCompletedMidnight < todayMidnight;
+
+    case '72hr':
+      // Available if 3 calendar days have passed
+      const threeDaysAgo = new Date(todayMidnight);
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+      return lastCompletedMidnight <= threeDaysAgo;
+
+    case 'weekly':
+      // Available if a new week has started (Monday at midnight)
+      const today = now.getDay();
+      const lastCompletedDay = lastCompletedAt.getDay();
+      const daysSinceMonday = (today + 6) % 7; // 0 = Monday
+      const daysSinceLastCompleted = (lastCompletedDay + 6) % 7;
+      
+      if (daysSinceMonday > daysSinceLastCompleted) {
+        return true; // New week has started
+      }
+      if (daysSinceMonday === daysSinceLastCompleted && now >= todayMidnight && lastCompletedMidnight < todayMidnight) {
+        return true; // Same week day but different week
+      }
+      return false;
+
+    case 'bi-weekly':
+      // Available if 14 calendar days have passed
+      const twoWeeksAgo = new Date(todayMidnight);
+      twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+      return lastCompletedMidnight <= twoWeeksAgo;
+
+    case 'monthly':
+      // Available if a new month has started
+      const nowMonth = now.getMonth();
+      const nowYear = now.getFullYear();
+      const lastMonth = lastCompletedAt.getMonth();
+      const lastYear = lastCompletedAt.getFullYear();
+      return nowYear > lastYear || (nowYear === lastYear && nowMonth > lastMonth);
+
+    case 'quarterly':
+      // Available if a new quarter has started (every 3 months)
+      const nowQuarter = Math.floor(now.getMonth() / 3);
+      const lastQuarter = Math.floor(lastCompletedAt.getMonth() / 3);
+      return now.getFullYear() > lastCompletedAt.getFullYear() || (now.getFullYear() === lastCompletedAt.getFullYear() && nowQuarter > lastQuarter);
+
+    default:
+      return false;
+  }
 }
 // ==================== INIT ====================
 document.addEventListener('DOMContentLoaded', function() {
