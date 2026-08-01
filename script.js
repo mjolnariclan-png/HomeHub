@@ -5613,12 +5613,12 @@ function setupSidebarToggle() {
     }, false);
 
     function handleSwipe() {
-        const swipeThreshold = 50; // pixels
+        const swipeThreshold = 80; // pixels
         const diff = touchEndX - touchStartX;
 
         if (Math.abs(diff) < swipeThreshold) return;
 
-        if (diff > swipeThreshold && touchStartX < 30) {
+        if (diff > swipeThreshold && touchStartX < 60) {
             // Swiped right from left edge → open
             sidebar.classList.add('open');
             if (backdrop) backdrop.classList.add('active');
