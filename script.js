@@ -11,6 +11,7 @@ try {
     supabaseClient = null;
 }
 
+const MEDIA_CARD_PREFIX = 'card-backgrounds';
 const MEDIA_BUCKET = 'homehub-media';
 const MEDIA_AVATAR_PREFIX = 'avatars';
 const MEDIA_BACKGROUND_PREFIX = 'backgrounds';
@@ -73,7 +74,9 @@ function setSignupMode(mode) {
         familyCode.style.display = 'block';
     }
 }
-
+function getCardStoragePath(userId, cardKey) {
+    return userId && cardKey ? `${MEDIA_CARD_PREFIX}/${userId}/${cardKey}.png` : null;
+}
 
 // ==================== TABLET MODE ====================
 function hasHouseholdControlAccess(user = store.user) {
@@ -218,16 +221,39 @@ function setCardMode(mode) {
     renderPage(store.currentPage || 'dashboard');
 }
 
-function loadCardBackgrounds(userId = store.user?.id) {
+async function loadCardBackgrounds(userId = store.user?.id) {
+    // Always start from localStorage so offline mode works
     const key = getCardBackgroundsStorageKey(userId);
-    if (!key) return;
+    let localData = {};
+    if (key) {
+        try {
+            const raw = localStorage.getItem(key);
+            localData = raw ? JSON.parse(raw) : {};
+        } catch (err) {
+            localData = {};
+        }
+    }
+    store.cardBackgrounds = { ...localData };
 
-    try {
-        const raw = localStorage.getItem(key);
-        store.cardBackgrounds = raw ? JSON.parse(raw) : {};
-    } catch (err) {
-        console.warn('Card backgrounds load failed:', err);
-        store.cardBackgrounds = {};
+    // If no cloud client, stop here
+    if (!userId || !supabaseClient) return;
+
+    // Pull cloud versions for every known card key
+    const cards = getCardBlockOptions();
+    await Promise.all(cards.map(async ({ key }) => {
+        const path = getCardStoragePath(userId, key);
+        const signedUrl = await getSignedMediaUrl(path);
+        if (signedUrl) {
+            store.cardBackgrounds[key] = signedUrl;
+        } else if (!localData[key]?.startsWith('data:')) {
+            // Cloud empty and local isn't a real image → clear it
+            delete store.cardBackgrounds[key];
+        }
+    }));
+
+    // Save merged result back to localStorage for offline use
+    if (key) {
+        localStorage.setItem(key, JSON.stringify(store.cardBackgrounds || {}));
     }
 }
 
@@ -245,7 +271,7 @@ function getCardBackgroundStyle(cardKey) {
 
 async function uploadCardBlockImage(event, cardKey) {
     const file = event?.target?.files?.[0];
-    if (!file || !cardKey) return;
+    if (!file || !cardKey || !store.user?.id) return;
 
     if (file.type !== 'image/png') {
         alert('Please upload a PNG image.');
@@ -253,21 +279,64 @@ async function uploadCardBlockImage(event, cardKey) {
     }
 
     try {
-        const dataUrl = await readImageFile(file);
+        // Resize for card use (max 1200x800, no crop)
+        const dataUrl = await resizeImageForStorage(file, 1200, 800, false);
+
+        // Show immediately from local data URL
         store.cardBackgrounds = store.cardBackgrounds || {};
         store.cardBackgrounds[cardKey] = dataUrl;
         saveCardBackgrounds();
         renderPage(store.currentPage || 'dashboard');
+
+        // Upload to Supabase in background
+        const blob = dataUrlToBlob(dataUrl);
+        const path = getCardStoragePath(store.user.id, cardKey);
+
+        const { error } = await supabaseClient
+            .storage
+            .from(MEDIA_BUCKET)
+            .upload(path, blob, {
+                upsert: true,
+                contentType: 'image/png',
+                cacheControl: '3600'
+            });
+
+        if (error) {
+            console.error('Card background upload error:', error);
+            return;
+        }
+
+        // Replace local data URL with cloud signed URL
+        const signedUrl = await getSignedMediaUrl(path);
+        if (signedUrl) {
+            store.cardBackgrounds[cardKey] = signedUrl;
+            saveCardBackgrounds();
+            renderPage(store.currentPage || 'dashboard');
+        }
     } catch (err) {
         console.error('Card image upload failed:', err);
         alert('Could not load this image. Try a smaller PNG.');
     }
 }
 
-function removeCardBlockImage(cardKey) {
-    if (!cardKey || !store.cardBackgrounds?.[cardKey]) return;
-    delete store.cardBackgrounds[cardKey];
-    saveCardBackgrounds();
+async function removeCardBlockImage(cardKey) {
+    if (!cardKey || !store.user?.id) return;
+
+    // Delete from Supabase Storage
+    const path = getCardStoragePath(store.user.id, cardKey);
+    if (path && supabaseClient) {
+        await supabaseClient.storage.from(MEDIA_BUCKET).remove([path]);
+    }
+
+    // Delete from local cache
+    if (store.cardBackgrounds?.[cardKey]) {
+        delete store.cardBackgrounds[cardKey];
+    }
+    const key = getCardBackgroundsStorageKey(store.user?.id);
+    if (key) {
+        localStorage.setItem(key, JSON.stringify(store.cardBackgrounds || {}));
+    }
+
     renderPage(store.currentPage || 'dashboard');
 }
 
@@ -394,15 +463,16 @@ async function mediaObjectExists(path) {
 async function getSignedMediaUrl(path) {
     if (!path || !supabaseClient) return null;
 
-    const exists = await mediaObjectExists(path);
-    if (!exists) return null;
-
     const { data, error } = await supabaseClient
         .storage
         .from(MEDIA_BUCKET)
         .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
 
-    if (error || !data?.signedUrl) return null;
+    if (error || !data?.signedUrl) {
+        console.warn('Signed URL failed for', path, error);
+        return null;
+    }
+    
     return `${data.signedUrl}&v=${Date.now()}`;
 }
 
@@ -433,8 +503,13 @@ async function preloadFamilyAvatarMedia() {
         if (!store.userMedia[userId]) store.userMedia[userId] = { avatarUrl: null, backgroundUrl: null, updatedAt: 0 };
 
         const avatarPath = getAvatarStoragePath(userId);
-        const avatarUrl = await getSignedMediaUrl(avatarPath);
-        store.userMedia[userId].avatarUrl = avatarUrl || null;
+        
+        const { data, error } = await supabaseClient
+            .storage
+            .from(MEDIA_BUCKET)
+            .createSignedUrl(avatarPath, SIGNED_URL_TTL_SECONDS);
+            
+        store.userMedia[userId].avatarUrl = (!error && data?.signedUrl) ? `${data.signedUrl}&v=${Date.now()}` : null;
         store.userMedia[userId].updatedAt = Date.now();
     }));
 }
@@ -1291,7 +1366,7 @@ async function bootstrapUser(userId) {
     store.family = null;
     store.userMedia = {};
     loadUserDisplayPrefs(userId);
-    loadCardBackgrounds(userId);
+    await loadCardBackgrounds(userId);
 
     // Load family once (if exists)
     if (profile.family_id) {
