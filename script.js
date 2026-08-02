@@ -83,7 +83,7 @@ function hasHouseholdControlAccess(user = store.user) {
 
 function canAddItems(user = store.user) {
     const role = (user?.role || '').toLowerCase();
-    return role === 'admin' || role === 'parent';
+    return role === 'admin' || role === 'parent' || role === 'adult';
 }
 
 function requireAddPermission() {
@@ -99,7 +99,7 @@ function isChildAccount(user = store.user) {
 
 function canAccessPage(page, user = store.user) {
     if (!isChildAccount(user)) return true;
-    const childAllowedPages = new Set(['dashboard', 'todo', 'chores', 'store', 'admin', 'calendar', 'leaderboard']);
+    const childAllowedPages = new Set(['todo', 'chores', 'store', 'admin', 'calendar', 'leaderboard']);
     return childAllowedPages.has(page);
 }
 
@@ -665,12 +665,11 @@ function getUserName(userId) {
     return member ? (member.display_name || member.username) : 'Unknown';
 }
 
-// ==================== NAVIGATION ====================
 function navigateTo(page) {
     applyPageAccessControl();
     if (!canAccessPage(page)) {
-        alert('Kids cannot access Shopping List, Budget, Recipes, or Admin controls.');
-        page = 'dashboard';
+        alert('You do not have permission to access this page.');
+        page = isChildAccount() ? 'chores' : 'dashboard';
     }
 
     store.currentPage = page;
@@ -694,7 +693,6 @@ function navigateTo(page) {
     };
     document.getElementById('pageTitle').textContent = titles[page] || 'Dashboard';
     
-    // Show/hide add button per page
     const addBtn = document.getElementById('addBtn');
     const noAddPages = ['dashboard', 'leaderboard', 'admin'];
     addBtn.style.display = (!canAddItems() || noAddPages.includes(page)) ? 'none' : 'inline-flex';
@@ -1955,10 +1953,12 @@ async function addChore(title, description, value, points, category, room, recur
 
 async function completeChore(choreId) {
     // TABLET MODE: Skip approval, just mark done and award immediately
+        // TABLET MODE: Pick a family member to submit for approval
     if (isTabletMode()) {
-        const memberOptions = store.familyMembers.map(m =>
-            `<option value="${m.id}">${m.display_name || m.username}</option>`
-        ).join('');
+        const memberOptions = store.familyMembers
+            .filter(m => m.id !== store.user?.id)
+            .map(m => `<option value="${m.id}">${m.display_name || m.username}</option>`)
+            .join('');
 
         showModal('Who completed this chore?', `
             <div class="form-group">
@@ -1968,7 +1968,7 @@ async function completeChore(choreId) {
                     ${memberOptions}
                 </select>
             </div>
-            <button class="btn btn-primary w-full" onclick="submitTabletChoreCompletion('${choreId}')">Confirm Completion</button>
+            <button class="btn btn-primary w-full" onclick="submitTabletChoreCompletion('${choreId}')">Submit for Approval</button>
         `);
         return;
     }
@@ -1994,69 +1994,30 @@ async function submitTabletChoreCompletion(choreId) {
         return;
     }
 
-    const member = store.familyMembers.find(m => m.id === selectedMemberId);
-    if (!member) {
-        alert('Selected family member was not found.');
-        return;
-    }
-
     closeModal();
 
-    const chore = store.chores.find(c => c.id === choreId) || store.allFamilyChores.find(c => c.id === choreId);
-    if (!chore) return;
+    // Insert as PENDING approval (tablet mode submits on behalf of selected user)
+    const { error } = await supabaseClient.from('chore_completions').insert({
+        chore_id: choreId,
+        completed_by: selectedMemberId,
+        status: 'pending'
+    }).select();
 
-    // Award points/money immediately with level multiplier
-    const level = member.level || 1;
-    const multiplier = parseFloat(getLevelMultiplier(level));
-    const finalPoints = Math.round((chore.points || 0) * multiplier);
-    const finalValue = parseFloat((chore.value || 0) * multiplier);
-
-    const newPoints = (member.points || 0) + finalPoints;
-    const newBalance = (member.balance || 0) + finalValue;
-    const newLevel = getLevelFromPoints(newPoints);
-
-    // Update member profile
-    const { error: profileError } = await supabaseClient
-        .from('profiles')
-        .update({
-            points: newPoints,
-            balance: newBalance,
-            level: newLevel
-        })
-        .eq('id', member.id);
-
-    if (profileError) {
-        alert('Error awarding points: ' + profileError.message);
+    if (error) {
+        alert('Error: ' + error.message);
         return;
     }
 
-    // Update chore last_completed_at so cooldown starts
-    await supabaseClient
-        .from('chores')
-        .update({ last_completed_at: new Date().toISOString() })
-        .eq('id', choreId);
-
-    // Optional: Log it for tracking
-    await supabaseClient.from('chore_completions').insert({
-        chore_id: choreId,
-        completed_by: member.id,
-        status: 'approved', // auto-approved
-        approved_by: store.user.id,
-        approved_at: new Date().toISOString()
-    });
-
-    // Refresh and show
-    await loadFamilyData();
-    renderPage('chores');
-
-    // Toast instead of alert
     showToast({
-        icon: '✅',
-        title: 'Chore Completed!',
-        body: `${member.display_name || member.username} earned ${finalPoints} pts and $${finalValue.toFixed(2)}`,
+        icon: '⏳',
+        title: 'Chore Submitted',
+        body: 'Chore completion sent for approval.',
         type: 'chore',
         deepLink: 'chores'
     });
+
+    await loadChores();
+    renderPage('chores');
 }
 
 function getSelectedPendingCompletionIds() {
@@ -2674,7 +2635,7 @@ function renderTodo(container) {
     } else {
         const myTodos = activeTodos.filter(t => {
             const assignedId = t.assigned_to?.id || t.assigned_to;
-            return assignedId === store.user?.id || !assignedId;
+            return assignedId === store.user?.id;
         });
         
         if (myTodos.length === 0) {
@@ -4627,6 +4588,15 @@ function renderCalendar(container) {
     const year = calendarCurrentDate.getFullYear();
     const month = calendarCurrentDate.getMonth();
     
+    let visibleEvents = store.calendarEvents;
+    if (isChildAccount()) {
+        const myId = store.user?.id;
+        visibleEvents = store.calendarEvents.filter(e => {
+            const assignedId = e.assigned_to?.id || e.assigned_to;
+            return assignedId === myId || assignedId === null || assignedId === undefined;
+        });
+    }
+
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
     const startPadding = firstDay.getDay();
@@ -4639,7 +4609,7 @@ function renderCalendar(container) {
     today.setHours(0, 0, 0, 0);
     
     // Filter events for this month's grid — SHOW ALL events for this month (past + future)
-    const monthEvents = store.calendarEvents.filter(e => {
+    const monthEvents = visibleEvents.filter(e => {
         const isoMatch = e.start_time.match(/^(\d{4})-(\d{2})-(\d{2})/);
         let eventYear, eventMonth;
         if (isoMatch) {
@@ -4688,7 +4658,7 @@ function renderCalendar(container) {
     const thirtyDaysFromNow = new Date(today);
     thirtyDaysFromNow.setDate(today.getDate() + 30);
     
-    const upcomingEvents = store.calendarEvents.filter(e => {
+    const upcomingEvents = visibleEvents.filter(e => {
         const isoMatch = e.start_time.match(/^(\d{4})-(\d{2})-(\d{2})/);
         let eventDateObj;
         if (isoMatch) {
@@ -4771,7 +4741,7 @@ function changeCalendarMonth(delta) {
 function showDayEvents(year, month, day) {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     
-    const dayEvents = store.calendarEvents.filter(e => {
+    const dayEvents = visibleEvents.filter(e => {
         const isoMatch = e.start_time.match(/^(\d{4})-(\d{2})-(\d{2})/);
         if (isoMatch) {
             return parseInt(isoMatch[1]) === year && 
@@ -5373,151 +5343,157 @@ async function submitStoreItem() {
     if (success) closeModal();
 }
 
-// ==================== RENDER: ADMIN ====================
 function renderAdmin(container) {
-    const isAdmin = hasHouseholdControlAccess();
+    const role = (store.user?.role || '').toLowerCase();
+    const isAdmin = role === 'admin';
+    const isChild = isChildAccount();
     const myName = store.user?.display_name || store.user?.username || 'U';
     const myAvatar = getStoredProfileAvatar(store.user?.id);
     const cardOptions = getCardBlockOptions();
     
-    container.innerHTML = `
-        <div class="fade-in">
-            <div class="dashboard-grid admin-grid">
-                <!-- Profile Card -->
-                <div class="card" style="${getCardBackgroundStyle('admin_profile')}">
-                    <div class="card-header">
-                        <div class="card-title">👤 Your Profile</div>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;">
-                        <div class="avatar" style="${myAvatar ? 'background:transparent;' : `background:${getUserColorHex(store.user?.id)};`}width:64px;height:64px;font-size:1.5rem;">
-                            ${myAvatar ? `<img class="avatar-img" src="${myAvatar}" alt="${myName}">` : myName.substring(0, 2).toUpperCase()}
-                        </div>
-                        <div>
-                            <div style="font-size:1.25rem;font-weight:700;">${store.user?.display_name || store.user?.username}</div>
-                            <div style="color:var(--text-muted);text-transform:capitalize;">${store.user?.role || 'User'}</div>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Profile Picture (PNG)</label>
-                        <input type="file" class="form-input" accept="image/png" onchange="uploadMyAvatar(event)">
-                        <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;">Recommended: square PNG, at least 512 x 512.</div>
-                        <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="removeMyAvatar()">Remove Profile Picture</button>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Personal Background (PNG)</label>
-                        <input type="file" class="form-input" accept="image/png" onchange="uploadMyBackground(event)">
-                        <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;">Recommended: 1920 x 1080 PNG.</div>
-                        <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="removeMyBackground()">Reset Background</button>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Display Name</label>
-                        <input type="text" class="form-input" id="adminDisplayName" value="${store.user?.display_name || ''}">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Username</label>
-                        <input type="text" class="form-input" value="${store.user?.username || ''}" disabled style="opacity:0.5;">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Role</label>
-                        <input type="text" class="form-input" value="${store.user?.role || 'User'}" disabled style="opacity:0.5;text-transform:capitalize;">
-                    </div>
-                    ${isAdmin ? `
-                        <div class="form-group" style="margin:8px 0 14px;">
-                            <label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                                <input type="checkbox" ${isTabletMode() ? 'checked' : ''} onchange="toggleTabletMode(this.checked)">
-                                Household Control Mode (Tablet)
-                            </label>
-                            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:6px;line-height:1.4;">
-                                When enabled, this account can complete chores for any family member from one shared device.
-                            </div>
-                        </div>
-                    ` : ''}
-                    <div class="form-group" style="margin:10px 0 14px;">
-                        <label class="form-label">Display Size</label>
-                        <select class="form-select" onchange="setDisplaySize(this.value)">
-                            <option value="compact" ${store.displayPrefs?.size === 'compact' ? 'selected' : ''}>Compact</option>
-                            <option value="normal" ${store.displayPrefs?.size !== 'compact' && store.displayPrefs?.size !== 'large' ? 'selected' : ''}>Normal</option>
-                            <option value="large" ${store.displayPrefs?.size === 'large' ? 'selected' : ''}>Large</option>
-                        </select>
-                        <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;">Use this to resize layout for phone/tablet readability.</div>
-                    </div>
-                    <div class="form-group" style="margin:10px 0 14px;">
-                        <label class="form-label">Card Style Mode</label>
-                        <select class="form-select" onchange="setCardMode(this.value)">
-                            <option value="surface" ${store.displayPrefs?.cardMode !== 'image' ? 'selected' : ''}>Surface Cards</option>
-                            <option value="image" ${store.displayPrefs?.cardMode === 'image' ? 'selected' : ''}>Background-Only Cards</option>
-                        </select>
-                        <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;">Background-Only keeps your image visible behind content blocks.</div>
-                    </div>
-                    <div class="form-group" style="margin:10px 0 14px;">
-                        <label class="form-label">Block Background Images (PNG)</label>
-                        <select class="form-select" id="cardImageTarget" style="margin-bottom:8px;">
-                            ${cardOptions.map(opt => `<option value="${opt.key}">${opt.label}</option>`).join('')}
-                        </select>
-                        <input type="file" class="form-input" accept="image/png" onchange="uploadCardImageForSelectedBlock(event)">
-                        <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="removeSelectedCardImage()">Remove Selected Block Image</button>
-                    </div>
-                    <button class="btn btn-primary w-full" onclick="updateProfile()">Update Profile</button>
+    let html = `<div class="fade-in"><div class="dashboard-grid admin-grid">`;
+    
+    // PROFILE CARD — everyone sees this
+    html += `
+        <div class="card" style="${getCardBackgroundStyle('admin_profile')}">
+            <div class="card-header">
+                <div class="card-title">👤 Your Profile</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;">
+                <div class="avatar" style="${myAvatar ? 'background:transparent;' : `background:${getUserColorHex(store.user?.id)};`}width:64px;height:64px;font-size:1.5rem;">
+                    ${myAvatar ? `<img class="avatar-img" src="${myAvatar}" alt="${myName}">` : myName.substring(0, 2).toUpperCase()}
                 </div>
-                
-                <!-- Family Card -->
-                <div class="card" style="${getCardBackgroundStyle('admin_family')}">
-                    <div class="card-header">
-                        <div class="card-title">👨‍👩‍👧‍👦 Family</div>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Family Name</label>
-                        <input type="text" class="form-input" id="familyNameInput" value="${store.family?.name || ''}">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Family Code</label>
-                        <div style="display:flex;gap:8px;">
-                            <input type="text" class="form-input" value="${store.family?.family_code || store.family?.code || (store.family?.id ? store.family.id.replace(/-/g, '').slice(-8).toUpperCase() : 'N/A')}" disabled style="opacity:0.5;flex:1;">
-                            <button class="btn btn-ghost" onclick="copyFamilyCode()">📋</button>
-                        </div>
-                    </div>
-                    ${isAdmin ? `<button class="btn btn-primary w-full" onclick="updateFamily()">Update Family</button>` : ''}
-                </div>
-                
-                <!-- Users Card -->
-                <div class="card" style="grid-column:1 / -1;${getCardBackgroundStyle('admin_members')}">
-                    <div class="card-header">
-                        <div class="card-title">👥 Family Members</div>
-                    </div>
-                    <div class="list-container">
-                        ${store.familyMembers.map(m => `
-                            <div class="list-item">
-                                <div class="avatar" style="${getStoredProfileAvatar(m.id) ? 'background:transparent;' : `background:${getUserColorHex(m.id)};`}width:40px;height:40px;">
-                                    ${getStoredProfileAvatar(m.id) ? `<img class="avatar-img" src="${getStoredProfileAvatar(m.id)}" alt="${m.display_name || m.username}">` : (m.display_name || m.username).substring(0, 2).toUpperCase()}
-                                </div>
-                                <div class="list-content">
-                                    <div class="list-title">${m.display_name || m.username}</div>
-                                    <div class="list-meta">
-                                        <span style="text-transform:capitalize;">${m.role}</span>
-                                        <span>⭐ ${m.points || 0} pts</span>
-                                        <span>💰 $${(m.balance || 0).toFixed(2)}</span>
-                                        <span>🏆 Level ${m.level || 1}</span>
-                                    </div>
-                                </div>
-                                ${isAdmin && m.id !== store.user?.id ? `
-                                    <select class="form-select" style="width:auto;" onchange="changeUserRole('${m.id}', this.value)">
-                                        <option value="user" ${m.role === 'user' ? 'selected' : ''}>User</option>
-                                        <option value="parent" ${m.role === 'parent' ? 'selected' : ''}>Parent</option>
-                                        <option value="adult" ${m.role === 'adult' ? 'selected' : ''}>Adult</option>
-                                        <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Admin</option>
-                                    </select>
-                                ` : ''}
-                            </div>
-                        `).join('')}
-                    </div>
+                <div>
+                    <div style="font-size:1.25rem;font-weight:700;">${store.user?.display_name || store.user?.username}</div>
+                    <div style="color:var(--text-muted);text-transform:capitalize;">${store.user?.role || 'User'}</div>
                 </div>
             </div>
-            
-            <div style="margin-top:20px;text-align:center;">
-                <button class="btn btn-danger" onclick="logout()">🚪 Log Out</button>
+            <div class="form-group">
+                <label class="form-label">Profile Picture (PNG)</label>
+                <input type="file" class="form-input" accept="image/png" onchange="uploadMyAvatar(event)">
+                <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;">Recommended: square PNG, at least 512 x 512.</div>
+                <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="removeMyAvatar()">Remove Profile Picture</button>
             </div>
+            <div class="form-group">
+                <label class="form-label">Personal Background (PNG)</label>
+                <input type="file" class="form-input" accept="image/png" onchange="uploadMyBackground(event)">
+                <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;">Recommended: 1920 x 1080 PNG.</div>
+                <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="removeMyBackground()">Reset Background</button>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Display Name</label>
+                <input type="text" class="form-input" id="adminDisplayName" value="${store.user?.display_name || ''}">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Username</label>
+                <input type="text" class="form-input" value="${store.user?.username || ''}" disabled style="opacity:0.5;">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Role</label>
+                <input type="text" class="form-input" value="${store.user?.role || 'User'}" disabled style="opacity:0.5;text-transform:capitalize;">
+            </div>
+            ${!isChild ? `
+                <div class="form-group" style="margin:8px 0 14px;">
+                    <label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" ${isTabletMode() ? 'checked' : ''} onchange="toggleTabletMode(this.checked)">
+                        Household Control Mode (Tablet)
+                    </label>
+                    <div style="font-size:0.8rem;color:var(--text-muted);margin-top:6px;line-height:1.4;">
+                        When enabled, this account can complete chores for any family member from one shared device.
+                    </div>
+                </div>
+                <div class="form-group" style="margin:10px 0 14px;">
+                    <label class="form-label">Display Size</label>
+                    <select class="form-select" onchange="setDisplaySize(this.value)">
+                        <option value="compact" ${store.displayPrefs?.size === 'compact' ? 'selected' : ''}>Compact</option>
+                        <option value="normal" ${store.displayPrefs?.size !== 'compact' && store.displayPrefs?.size !== 'large' ? 'selected' : ''}>Normal</option>
+                        <option value="large" ${store.displayPrefs?.size === 'large' ? 'selected' : ''}>Large</option>
+                    </select>
+                    <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;">Use this to resize layout for phone/tablet readability.</div>
+                </div>
+                <div class="form-group" style="margin:10px 0 14px;">
+                    <label class="form-label">Card Style Mode</label>
+                    <select class="form-select" onchange="setCardMode(this.value)">
+                        <option value="surface" ${store.displayPrefs?.cardMode !== 'image' ? 'selected' : ''}>Surface Cards</option>
+                        <option value="image" ${store.displayPrefs?.cardMode === 'image' ? 'selected' : ''}>Background-Only Cards</option>
+                    </select>
+                    <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;">Background-Only keeps your image visible behind content blocks.</div>
+                </div>
+                <div class="form-group" style="margin:10px 0 14px;">
+                    <label class="form-label">Block Background Images (PNG)</label>
+                    <select class="form-select" id="cardImageTarget" style="margin-bottom:8px;">
+                        ${cardOptions.map(opt => `<option value="${opt.key}">${opt.label}</option>`).join('')}
+                    </select>
+                    <input type="file" class="form-input" accept="image/png" onchange="uploadCardImageForSelectedBlock(event)">
+                    <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="removeSelectedCardImage()">Remove Selected Block Image</button>
+                </div>
+            ` : ''}
+            <button class="btn btn-primary w-full" onclick="updateProfile()">Update Profile</button>
         </div>
     `;
+    
+    // FAMILY CARD — Admin can edit; Parent/Adult see read-only; Child does not see
+    if (!isChild) {
+        html += `
+            <div class="card" style="${getCardBackgroundStyle('admin_family')}">
+                <div class="card-header">
+                    <div class="card-title">👨‍👩‍👧‍👦 Family</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Family Name</label>
+                    <input type="text" class="form-input" id="familyNameInput" value="${store.family?.name || ''}" ${!isAdmin ? 'disabled style="opacity:0.5;"' : ''}>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Family Code</label>
+                    <div style="display:flex;gap:8px;">
+                        <input type="text" class="form-input" value="${store.family?.family_code || store.family?.code || (store.family?.id ? store.family.id.replace(/-/g, '').slice(-8).toUpperCase() : 'N/A')}" disabled style="opacity:0.5;flex:1;">
+                        <button class="btn btn-ghost" onclick="copyFamilyCode()">📋</button>
+                    </div>
+                </div>
+                ${isAdmin ? `<button class="btn btn-primary w-full" onclick="updateFamily()">Update Family</button>` : ''}
+            </div>
+        `;
+    }
+    
+    // USERS CARD — visible to Admin/Parent/Adult; ONLY Admin can change roles
+    if (!isChild) {
+        html += `
+            <div class="card" style="grid-column:1 / -1;${getCardBackgroundStyle('admin_members')}">
+                <div class="card-header">
+                    <div class="card-title">👥 Family Members</div>
+                </div>
+                <div class="list-container">
+                    ${store.familyMembers.map(m => `
+                        <div class="list-item">
+                            <div class="avatar" style="${getStoredProfileAvatar(m.id) ? 'background:transparent;' : `background:${getUserColorHex(m.id)};`}width:40px;height:40px;">
+                                ${getStoredProfileAvatar(m.id) ? `<img class="avatar-img" src="${getStoredProfileAvatar(m.id)}" alt="${m.display_name || m.username}">` : (m.display_name || m.username).substring(0, 2).toUpperCase()}
+                            </div>
+                            <div class="list-content">
+                                <div class="list-title">${m.display_name || m.username}</div>
+                                <div class="list-meta">
+                                    <span style="text-transform:capitalize;">${m.role}</span>
+                                    <span>⭐ ${m.points || 0} pts</span>
+                                    <span>💰 $${(m.balance || 0).toFixed(2)}</span>
+                                    <span>🏆 Level ${m.level || 1}</span>
+                                </div>
+                            </div>
+                            ${isAdmin && m.id !== store.user?.id ? `
+                                <select class="form-select" style="width:auto;" onchange="changeUserRole('${m.id}', this.value)">
+                                    <option value="user" ${m.role === 'user' ? 'selected' : ''}>User</option>
+                                    <option value="parent" ${m.role === 'parent' ? 'selected' : ''}>Parent</option>
+                                    <option value="adult" ${m.role === 'adult' ? 'selected' : ''}>Adult</option>
+                                    <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Admin</option>
+                                </select>
+                            ` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    html += `</div><div style="margin-top:20px;text-align:center;"><button class="btn btn-danger" onclick="logout()">🚪 Log Out</button></div></div>`;
+    container.innerHTML = html;
 }
 
 async function updateProfile() {
@@ -5654,78 +5630,6 @@ function setupSidebarToggle() {
 }
 
 
-/**
- * Determine if a chore is available to be completed again based on its recurrence and last completion time.
- * Resets happen at midnight (or on schedule boundaries), not relative to completion time.
- */
-function isChoreAvailable(chore, lastCompletion) {
-  const now = new Date();
-  const recurrence = chore.recurrence || 'none';
-  
-  if (recurrence === 'none' || !lastCompletion) {
-    return true; // One-time or never completed — always available
-  }
-
-  const lastCompletedAt = new Date(lastCompletion.created_at);
-  
-  // Get today's date at midnight in the user's local timezone
-  const todayMidnight = new Date();
-  todayMidnight.setHours(0, 0, 0, 0);
-  
-  // Get last completion date at midnight
-  const lastCompletedMidnight = new Date(lastCompletedAt);
-  lastCompletedMidnight.setHours(0, 0, 0, 0);
-
-  switch (recurrence) {
-    case '24hr':
-      // Available if a new day has started (midnight has passed)
-      return now >= todayMidnight && lastCompletedMidnight < todayMidnight;
-
-    case '72hr':
-      // Available if 3 calendar days have passed
-      const threeDaysAgo = new Date(todayMidnight);
-      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-      return lastCompletedMidnight <= threeDaysAgo;
-
-    case 'weekly':
-      // Available if a new week has started (Monday at midnight)
-      const today = now.getDay();
-      const lastCompletedDay = lastCompletedAt.getDay();
-      const daysSinceMonday = (today + 6) % 7; // 0 = Monday
-      const daysSinceLastCompleted = (lastCompletedDay + 6) % 7;
-      
-      if (daysSinceMonday > daysSinceLastCompleted) {
-        return true; // New week has started
-      }
-      if (daysSinceMonday === daysSinceLastCompleted && now >= todayMidnight && lastCompletedMidnight < todayMidnight) {
-        return true; // Same week day but different week
-      }
-      return false;
-
-    case 'bi-weekly':
-      // Available if 14 calendar days have passed
-      const twoWeeksAgo = new Date(todayMidnight);
-      twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-      return lastCompletedMidnight <= twoWeeksAgo;
-
-    case 'monthly':
-      // Available if a new month has started
-      const nowMonth = now.getMonth();
-      const nowYear = now.getFullYear();
-      const lastMonth = lastCompletedAt.getMonth();
-      const lastYear = lastCompletedAt.getFullYear();
-      return nowYear > lastYear || (nowYear === lastYear && nowMonth > lastMonth);
-
-    case 'quarterly':
-      // Available if a new quarter has started (every 3 months)
-      const nowQuarter = Math.floor(now.getMonth() / 3);
-      const lastQuarter = Math.floor(lastCompletedAt.getMonth() / 3);
-      return now.getFullYear() > lastCompletedAt.getFullYear() || (now.getFullYear() === lastCompletedAt.getFullYear() && nowQuarter > lastQuarter);
-
-    default:
-      return false;
-  }
-}
 // ==================== INIT ====================
 document.addEventListener('DOMContentLoaded', function() {
     setupSidebarToggle();
