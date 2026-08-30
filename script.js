@@ -28,6 +28,7 @@ const store = {
     allFamilyChores: [],
     chores: [],
     pendingCompletions: [],
+    recentCompletions: [], // For availability calculation
     shoppingList: [],
     todos: [],
     recipes: [],
@@ -35,6 +36,7 @@ const store = {
     calendarEvents: [],
     leaderboard: [],
     budgetEntries: [],
+    budgetAccounts: [],
     transactions: [],
     notifications: [],
     badges: [],
@@ -55,6 +57,13 @@ const ROOMS = [
     'Garage', 'Hallway', 'Kitchen', 'Laundry Room', 'Living Room',
     'Moms Art Area', 'Mom and Dads Room', 'Peytons Bedroom', 'Playroom', 'Random',
     'Truck', 'Turbo (Cat)', 'Van', 'Zeus (Dog)'
+];
+
+// ==================== BILL CATEGORIES ====================
+const BILL_CATEGORIES = [
+    'Electric', 'Gas', 'Water', 'Internet', 'Phone',
+    'Child Care', 'Car Payment', 'Mortgage', 'Rent',
+    'Car Insurance', 'Home Insurance', 'Pets', 'Other Bills'
 ];
 
 
@@ -1515,19 +1524,15 @@ async function loadChores() {
     
     // For the main list, still sort with availability logic
     store.chores = (data || []).sort((a, b) => {
-        const aPending = store.pendingCompletions?.some(pc => 
+        const aPending = store.pendingCompletions?.some(pc =>
             pc.chore_id === a.id && pc.completed_by === store.user?.id && pc.status === 'pending'
         );
-        const bPending = store.pendingCompletions?.some(pc => 
+        const bPending = store.pendingCompletions?.some(pc =>
             pc.chore_id === b.id && pc.completed_by === store.user?.id && pc.status === 'pending'
         );
-        
-        // Get the last completion for each chore (approved status = actually completed)
-        const aLastCompletion = store.pendingCompletions?.find(pc => pc.chore_id === a.id && pc.status === 'approved');
-        const bLastCompletion = store.pendingCompletions?.find(pc => pc.chore_id === b.id && pc.status === 'approved');
-        
-        const aAvailable = isChoreAvailable(a, aLastCompletion) && !aPending;
-        const bAvailable = isChoreAvailable(b, bLastCompletion) && !bPending;
+
+        const aAvailable = isChoreAvailable(a, [...store.pendingCompletions, ...store.recentCompletions]) && !aPending;
+        const bAvailable = isChoreAvailable(b, [...store.pendingCompletions, ...store.recentCompletions]) && !bPending;
 
         if (aAvailable && !bAvailable) return -1;
         if (!aAvailable && bAvailable) return 1;
@@ -1540,7 +1545,7 @@ async function loadChores() {
         .select(`*, chore:chores(*)`)
         .eq('status', 'pending')
         .order('created_at', { ascending: false });
-        
+
     if (compError) {
         console.error('Error loading completions:', compError);
         store.pendingCompletions = [];
@@ -1550,7 +1555,28 @@ async function loadChores() {
             return chore && chore.family_id === store.user.family_id;
         });
     }
-    
+
+    // Load recent approved completions for availability calculation (last 30 days)
+    // Keep separate from pending so they don't show in approval UI
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const { data: approvedCompletions, error: approvedError } = await supabaseClient
+        .from('chore_completions')
+        .select(`*, chore:chores(*)`)
+        .eq('status', 'approved')
+        .gte('created_at', thirtyDaysAgo.toISOString())
+        .order('created_at', { ascending: false });
+
+    if (!approvedError && approvedCompletions) {
+        store.recentCompletions = (approvedCompletions || []).filter(pc => {
+            const chore = pc.chore;
+            return chore && chore.family_id === store.user.family_id;
+        });
+    } else {
+        store.recentCompletions = [];
+    }
+
     store.loading.chores = false;
 }
 
@@ -1810,7 +1836,21 @@ async function loadCalendarEvents() {
     store.calendarEvents = data || [];
 }
 
+async function loadBudgetAccounts() {
+    const { data, error } = await supabaseClient
+        .from('budget_accounts')
+        .select('*')
+        .eq('family_id', store.user.family_id)
+        .eq('is_active', true)
+        .order('account_type, created_at', { ascending: true });
+
+    if (error) { console.error('Error loading budget accounts:', error); return; }
+    store.budgetAccounts = data || [];
+}
+
 async function loadBudget() {
+    await loadBudgetAccounts();
+
     const { data: entries } = await supabaseClient
         .from('budget_entries')
         .select('*')
@@ -1891,7 +1931,7 @@ function setupRealtimeSubscriptions() {
     const familyId = store.user.family_id;
     const tables = [
         'chores', 'shopping_list', 'todos', 'recipes',
-        'calendar_events', 'budget_entries', 'shop_items'
+        'calendar_events', 'budget_entries', 'budget_accounts', 'shop_items'
     ];
     
     // Unsubscribe and remove any existing channels first
@@ -1927,6 +1967,7 @@ function handleRealtimeUpdate(table) {
         case 'recipes': loadRecipes().then(() => { if (store.currentPage === 'recipes') renderPage('recipes'); }); break;
         case 'calendar_events': loadCalendarEvents().then(() => { if (store.currentPage === 'calendar') renderPage('calendar'); }); break;
         case 'budget_entries': loadBudget().then(() => { if (store.currentPage === 'budget') renderPage('budget'); }); break;
+        case 'budget_accounts': loadBudgetAccounts().then(() => { if (store.currentPage === 'budget') renderPage('budget'); }); break;
         case 'shop_items': loadStoreItems().then(() => { if (store.currentPage === 'store') renderPage('store'); }); break;
     }
 }
@@ -1965,14 +2006,33 @@ async function deleteTodo(todoId) {
     renderPage('todo');
 }
 
-async function addShoppingItem(itemName, quantity, recipeId) {
+async function addShoppingItem(itemName, quantity, storeName, itemType, priority, notes, recipeId) {
     const { error } = await supabaseClient.from('shopping_list').insert({
         family_id: store.user.family_id,
         item_name: itemName,
         quantity: quantity || '1',
+        store: storeName || null,
+        item_type: itemType || 'other',
+        priority: priority || 'normal',
+        notes: notes || null,
         recipe_id: recipeId || null,
         created_by: store.user.id
     }).select();
+    if (error) { alert('Error: ' + error.message); return false; }
+    await loadShoppingList();
+    renderPage('shopping');
+    return true;
+}
+
+async function updateShoppingItem(itemId, itemName, quantity, storeName, itemType, priority, notes) {
+    const { error } = await supabaseClient.from('shopping_list').update({
+        item_name: itemName,
+        quantity: quantity || '1',
+        store: storeName || null,
+        item_type: itemType || 'other',
+        priority: priority || 'normal',
+        notes: notes || null
+    }).eq('id', itemId).select();
     if (error) { alert('Error: ' + error.message); return false; }
     await loadShoppingList();
     renderPage('shopping');
@@ -2177,13 +2237,22 @@ async function applyChoreApproval(completionId, choreId, userId, points, value, 
     member.balance = newBalance;
     member.level = newLevel;
 
-    await supabaseClient
-        .from('chores')
-        .update({ last_completed_at: new Date().toISOString() })
-        .eq('id', choreId);
+    // REMOVED: Don't update chore's last_completed_at
+    // The completion record's created_at serves as the completion date
 
     if (!silent) {
-        alert('Chore approved! ' + finalPoints + ' pts and $' + finalValue.toFixed(2) + ' awarded.');
+        // Show the actual completion date in the success message
+        const { data: completionData } = await supabaseClient
+            .from('chore_completions')
+            .select('created_at')
+            .eq('id', completionId)
+            .single();
+
+        const completionDate = completionData?.created_at
+            ? new Date(completionData.created_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })
+            : 'unknown date';
+
+        alert(`Chore approved! Completed on ${completionDate}. ${finalPoints} pts and $${finalValue.toFixed(2)} awarded.`);
     }
 
     return true;
@@ -2380,7 +2449,7 @@ async function generateRecurringInstances(baseEvent, recurrence) {
     if (error) console.error('Error generating recurring instances:', error);
 }
 
-async function addBudgetEntry(title, amount, entryType, category, dueDate, isRecurring, recurrenceType) {
+async function addBudgetEntry(title, amount, entryType, category, dueDate, isRecurring, recurrenceType, accountId) {
     const { error } = await supabaseClient.from('budget_entries').insert({
         family_id: store.user.family_id,
         title, amount: parseFloat(amount),
@@ -2389,12 +2458,54 @@ async function addBudgetEntry(title, amount, entryType, category, dueDate, isRec
         due_date: dueDate || null,
         is_recurring: isRecurring || false,
         recurrence_type: recurrenceType || 'none',
+        account_id: accountId || null,
         created_by: store.user.id
     }).select();
     if (error) { alert('Error: ' + error.message); return false; }
+
+    // Update account balance if account specified
+    if (accountId) {
+        if (entryType === 'expense') {
+            await updateAccountBalance(accountId, amount, true);
+        } else if (entryType === 'income') {
+            await updateAccountBalance(accountId, amount, false);
+        }
+    }
+
     await loadBudget();
     renderPage('budget');
     return true;
+}
+
+async function addBudgetAccount(name, type, initialBalance) {
+    const { error } = await supabaseClient.from('budget_accounts').insert({
+        family_id: store.user.family_id,
+        account_name: name,
+        account_type: type,
+        current_balance: parseFloat(initialBalance) || 0,
+        created_by: store.user.id
+    }).select();
+
+    if (error) { alert('Error: ' + error.message); return false; }
+    await loadBudgetAccounts();
+    return true;
+}
+
+async function updateAccountBalance(accountId, amount, isExpense) {
+    const account = store.budgetAccounts.find(a => a.id === accountId);
+    if (!account) return;
+
+    const newBalance = isExpense
+        ? account.current_balance - parseFloat(amount)
+        : account.current_balance + parseFloat(amount);
+
+    const { error } = await supabaseClient
+        .from('budget_accounts')
+        .update({ current_balance: newBalance, updated_at: new Date().toISOString() })
+        .eq('id', accountId);
+
+    if (error) { console.error('Error updating balance:', error); return; }
+    account.current_balance = newBalance;
 }
 
 async function addStoreItem(name, description, price) {
@@ -2896,13 +3007,21 @@ function renderShopping(container) {
                             <div class="list-item">
                                 <div class="checkbox" onclick="toggleShoppingItem('${item.id}', true)"></div>
                                 <div class="list-content">
-                                    <div class="list-title">${item.item_name}</div>
+                                    <div class="list-title">
+                                        ${item.priority === 'high' ? '🔴 ' : item.priority === 'low' ? '🟢 ' : ''}${item.item_name}
+                                    </div>
                                     <div class="list-meta">
                                         <span>📦 ${item.quantity || '1'}</span>
+                                        ${item.store ? `<span>🏪 ${item.store}</span>` : ''}
+                                        ${item.item_type ? `<span>🏷️ ${item.item_type}</span>` : ''}
                                         ${item.recipe ? `<span>🍳 ${item.recipe.name}</span>` : ''}
                                     </div>
+                                    ${item.notes ? `<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;">📝 ${item.notes}</div>` : ''}
                                 </div>
-                                <button class="btn btn-ghost btn-sm" onclick="deleteShoppingItem('${item.id}')">🗑️</button>
+                                <div style="display:flex;gap:4px;">
+                                    <button class="btn btn-ghost btn-sm" onclick="showEditShoppingModal('${item.id}')">✏️</button>
+                                    <button class="btn btn-ghost btn-sm" onclick="deleteShoppingItem('${item.id}')">🗑️</button>
+                                </div>
                             </div>
                         `).join('')}
                     </div>
@@ -2919,12 +3038,20 @@ function renderShopping(container) {
                             <div class="list-item completed">
                                 <div class="checkbox checked" onclick="toggleShoppingItem('${item.id}', false)">✓</div>
                                 <div class="list-content">
-                                    <div class="list-title">${item.item_name}</div>
+                                    <div class="list-title">
+                                        ${item.priority === 'high' ? '🔴 ' : item.priority === 'low' ? '🟢 ' : ''}${item.item_name}
+                                    </div>
                                     <div class="list-meta">
                                         <span>📦 ${item.quantity || '1'}</span>
+                                        ${item.store ? `<span>🏪 ${item.store}</span>` : ''}
+                                        ${item.item_type ? `<span>🏷️ ${item.item_type}</span>` : ''}
                                     </div>
+                                    ${item.notes ? `<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;">📝 ${item.notes}</div>` : ''}
                                 </div>
-                                <button class="btn btn-ghost btn-sm" onclick="deleteShoppingItem('${item.id}')">🗑️</button>
+                                <div style="display:flex;gap:4px;">
+                                    <button class="btn btn-ghost btn-sm" onclick="showEditShoppingModal('${item.id}')">✏️</button>
+                                    <button class="btn btn-ghost btn-sm" onclick="deleteShoppingItem('${item.id}')">🗑️</button>
+                                </div>
                             </div>
                         `).join('')}
                     </div>
@@ -2942,9 +3069,38 @@ function showAddShoppingModal() {
             <label class="form-label">Item Name *</label>
             <input type="text" class="form-input" id="shopItemName" placeholder="e.g., Milk">
         </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Quantity</label>
+                <input type="text" class="form-input" id="shopQuantity" placeholder="e.g., 1 gallon">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Store</label>
+                <input type="text" class="form-input" id="shopStore" placeholder="e.g., Walmart">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Item Type</label>
+                <select class="form-select" id="shopItemType">
+                    <option value="food">Food</option>
+                    <option value="household">Household</option>
+                    <option value="pet">Pet</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Priority</label>
+                <select class="form-select" id="shopPriority">
+                    <option value="low">Low</option>
+                    <option value="normal" selected>Normal</option>
+                    <option value="high">High</option>
+                </select>
+            </div>
+        </div>
         <div class="form-group">
-            <label class="form-label">Quantity</label>
-            <input type="text" class="form-input" id="shopQuantity" placeholder="e.g., 1 gallon">
+            <label class="form-label">Notes</label>
+            <textarea class="form-input" id="shopNotes" placeholder="Additional details..."></textarea>
         </div>
         <button class="btn btn-primary w-full" onclick="submitShoppingItem()">Add Item</button>
     `);
@@ -2953,9 +3109,74 @@ function showAddShoppingModal() {
 async function submitShoppingItem() {
     const itemName = document.getElementById('shopItemName').value.trim();
     const quantity = document.getElementById('shopQuantity').value.trim();
+    const storeName = document.getElementById('shopStore').value.trim();
+    const itemType = document.getElementById('shopItemType').value;
+    const priority = document.getElementById('shopPriority').value;
+    const notes = document.getElementById('shopNotes').value.trim();
+
     if (!itemName) { alert('Item name is required'); return; }
-    
-    const success = await addShoppingItem(itemName, quantity);
+
+    const success = await addShoppingItem(itemName, quantity, storeName, itemType, priority, notes);
+    if (success) closeModal();
+}
+
+function showEditShoppingModal(itemId) {
+    const item = store.shoppingList.find(s => s.id === itemId);
+    if (!item) return;
+
+    showModal('Edit Shopping Item', `
+        <div class="form-group">
+            <label class="form-label">Item Name *</label>
+            <input type="text" class="form-input" id="editShopItemName" value="${item.item_name}">
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Quantity</label>
+                <input type="text" class="form-input" id="editShopQuantity" value="${item.quantity || '1'}">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Store</label>
+                <input type="text" class="form-input" id="editShopStore" value="${item.store || ''}">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Item Type</label>
+                <select class="form-select" id="editShopItemType">
+                    <option value="food" ${item.item_type === 'food' ? 'selected' : ''}>Food</option>
+                    <option value="household" ${item.item_type === 'household' ? 'selected' : ''}>Household</option>
+                    <option value="pet" ${item.item_type === 'pet' ? 'selected' : ''}>Pet</option>
+                    <option value="other" ${!item.item_type || item.item_type === 'other' ? 'selected' : ''}>Other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Priority</label>
+                <select class="form-select" id="editShopPriority">
+                    <option value="low" ${item.priority === 'low' ? 'selected' : ''}>Low</option>
+                    <option value="normal" ${!item.priority || item.priority === 'normal' ? 'selected' : ''}>Normal</option>
+                    <option value="high" ${item.priority === 'high' ? 'selected' : ''}>High</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Notes</label>
+            <textarea class="form-input" id="editShopNotes">${item.notes || ''}</textarea>
+        </div>
+        <button class="btn btn-primary w-full" onclick="submitEditShoppingItem('${itemId}')">Update Item</button>
+    `);
+}
+
+async function submitEditShoppingItem(itemId) {
+    const itemName = document.getElementById('editShopItemName').value.trim();
+    const quantity = document.getElementById('editShopQuantity').value.trim();
+    const storeName = document.getElementById('editShopStore').value.trim();
+    const itemType = document.getElementById('editShopItemType').value;
+    const priority = document.getElementById('editShopPriority').value;
+    const notes = document.getElementById('editShopNotes').value.trim();
+
+    if (!itemName) { alert('Item name is required'); return; }
+
+    const success = await updateShoppingItem(itemId, itemName, quantity, storeName, itemType, priority, notes);
     if (success) closeModal();
 }
 
@@ -3034,11 +3255,27 @@ function formatCountdown(targetDate) {
     }
 }
 
-function isChoreAvailable(chore) {
-    if (!chore.last_completed_at) return true;
-    if (!chore.recurrence || chore.recurrence === 'none') return true;
+function isChoreAvailable(chore, pendingCompletions) {
+    // If no recurrence, always available for one-time chores unless approved
+    if (!chore.recurrence || chore.recurrence === 'none') {
+        // For one-time chores, check if there's an approved completion
+        const hasApproved = pendingCompletions?.some(pc => 
+            pc.chore_id === chore.id && pc.status === 'approved'
+        );
+        return !hasApproved;
+    }
     
-    const nextTime = getNextCompletionTime(chore.last_completed_at, chore.recurrence);
+    // For recurring chores, find the most recent completion (any status)
+    const allCompletions = pendingCompletions?.filter(pc => pc.chore_id === chore.id) || [];
+    if (allCompletions.length === 0) return true;
+    
+    // Get the most recent completion by created_at
+    const mostRecent = allCompletions.reduce((latest, current) => 
+        new Date(current.created_at) > new Date(latest.created_at) ? current : latest
+    );
+    
+    // Calculate next available time based on recurrence
+    const nextTime = getNextCompletionTime(mostRecent.created_at, chore.recurrence);
     if (!nextTime) return true;
     
     return new Date() >= nextTime;
@@ -3058,10 +3295,18 @@ function startChoreTimerUpdates() {
             const choreId = timerEl.dataset.choreId || timerEl.id.replace('timer-', '').replace('timer-btn-', '');
             const chore = store.chores.find(c => c.id === choreId);
             if (!chore) return;
-            
-            const nextTime = getNextCompletionTime(chore.last_completed_at, chore.recurrence);
-            const available = isChoreAvailable(chore);
-            
+
+            // Find most recent completion for this chore
+            const choreCompletions = store.pendingCompletions?.filter(pc => pc.chore_id === chore.id) || [];
+            const mostRecent = choreCompletions.length > 0
+                ? choreCompletions.reduce((latest, current) =>
+                    new Date(current.created_at) > new Date(latest.created_at) ? current : latest
+                )
+                : null;
+
+            const nextTime = mostRecent ? getNextCompletionTime(mostRecent.created_at, chore.recurrence) : null;
+            const available = isChoreAvailable(chore, [...store.pendingCompletions, ...store.recentCompletions]);
+
             if (available) {
                 if (timerEl.textContent !== '⏳ Ready!') {
                     timerEl.textContent = '⏳ Ready!';
@@ -3239,14 +3484,22 @@ function renderChores(container) {
                            ${roomChores.map(chore => {
                             const points = chore.points || 0;
                             const value = chore.value || 0;
-                            const isPending = store.pendingCompletions?.some(pc => 
+                            const isPending = store.pendingCompletions?.some(pc =>
                                 pc.chore_id === chore.id && pc.completed_by === store.user?.id && pc.status === 'pending'
                             );
-                            
-                            const nextTime = getNextCompletionTime(chore.last_completed_at, chore.recurrence);
-                            const available = isChoreAvailable(chore);
+
+                            // Find most recent completion for this chore
+                            const choreCompletions = store.pendingCompletions?.filter(pc => pc.chore_id === chore.id) || [];
+                            const mostRecent = choreCompletions.length > 0
+                                ? choreCompletions.reduce((latest, current) =>
+                                    new Date(current.created_at) > new Date(latest.created_at) ? current : latest
+                                )
+                                : null;
+
+                            const nextTime = mostRecent ? getNextCompletionTime(mostRecent.created_at, chore.recurrence) : null;
+                            const available = isChoreAvailable(chore, [...store.pendingCompletions, ...store.recentCompletions]);
                             const timerText = nextTime ? formatCountdown(nextTime) : 'Ready!';
-                            
+
                             const isOnCooldown = !available && !isPending && chore.recurrence && chore.recurrence !== 'none';
                             const isOneTimeDone = !available && !isPending && (!chore.recurrence || chore.recurrence === 'none');
                             
@@ -3581,12 +3834,20 @@ function renderRoomChoreDetail(choreList) {
             ${choreList.map(chore => {
                 const points = chore.points || 0;
                 const value = chore.value || 0;
-                const isPending = store.pendingCompletions?.some(pc => 
+                const isPending = store.pendingCompletions?.some(pc =>
                     pc.chore_id === chore.id && pc.completed_by === store.user?.id && pc.status === 'pending'
                 );
-                
-                const nextTime = getNextCompletionTime(chore.last_completed_at, chore.recurrence);
-                const available = isChoreAvailable(chore);
+
+                // Find most recent completion for this chore
+                const choreCompletions = store.pendingCompletions?.filter(pc => pc.chore_id === chore.id) || [];
+                const mostRecent = choreCompletions.length > 0
+                    ? choreCompletions.reduce((latest, current) =>
+                        new Date(current.created_at) > new Date(latest.created_at) ? current : latest
+                    )
+                    : null;
+
+                const nextTime = mostRecent ? getNextCompletionTime(mostRecent.created_at, chore.recurrence) : null;
+                const available = isChoreAvailable(chore, [...store.pendingCompletions, ...store.recentCompletions]);
                 const timerText = nextTime ? formatCountdown(nextTime) : 'Ready!';
                 const isOnCooldown = !available && !isPending && chore.recurrence && chore.recurrence !== 'none';
                 
@@ -5179,6 +5440,11 @@ function renderBudget(container) {
         timeZone: 'America/Chicago'
     });
 
+    // Separate accounts by type
+    const bankAccounts = store.budgetAccounts.filter(a => a.account_type === 'bank');
+    const ebtAccounts = store.budgetAccounts.filter(a => a.account_type === 'ebt');
+    const cashAccounts = store.budgetAccounts.filter(a => a.account_type === 'cash');
+
     const monthEntries = store.budgetEntries.filter((entry) => {
         const dateSource = entry.due_date || entry.created_at;
         if (!dateSource) return false;
@@ -5200,9 +5466,77 @@ function renderBudget(container) {
         .reduce((sum, e) => sum + parseFloat(e.amount), 0);
     const balance = totalIncome - totalExpenses;
 
+    // Calculate per-account monthly spending
+    const getAccountMonthlySpend = (accountId) => {
+        return monthEntries
+            .filter(e => e.account_id === accountId && e.entry_type === 'expense')
+            .reduce((sum, e) => sum + parseFloat(e.amount), 0);
+    };
+
     container.innerHTML = `
         <div class="fade-in">
-            <div class="budget-summary">
+            <!-- Account Balances Section -->
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-header">
+                    <div class="card-title">💰 Account Balances</div>
+                    <button class="btn btn-ghost btn-sm" onclick="showAddAccountModal()">+ Add Account</button>
+                </div>
+                <div style="padding:16px;">
+                    ${bankAccounts.length > 0 ? `
+                        <div style="margin-bottom:12px;">
+                            <div style="font-weight:600;margin-bottom:8px;color:var(--primary);">🏦 Bank Accounts</div>
+                            ${bankAccounts.map(acc => `
+                                <div style="display:flex;justify-content:space-between;padding:8px;background:var(--surface);margin-bottom:4px;border-radius:4px;">
+                                    <span>${acc.account_name}</span>
+                                    <span style="font-weight:600;">$${acc.current_balance.toFixed(2)}</span>
+                                </div>
+                                <div style="font-size:0.85rem;color:var(--text-muted);margin-left:8px;margin-bottom:8px;">
+                                    This month: -$${getAccountMonthlySpend(acc.id).toFixed(2)}
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+
+                    ${ebtAccounts.length > 0 ? `
+                        <div style="margin-bottom:12px;">
+                            <div style="font-weight:600;margin-bottom:8px;color:var(--success);">💳 EBT Cards</div>
+                            ${ebtAccounts.map(acc => `
+                                <div style="display:flex;justify-content:space-between;padding:8px;background:var(--surface);margin-bottom:4px;border-radius:4px;">
+                                    <span>${acc.account_name}</span>
+                                    <span style="font-weight:600;">$${acc.current_balance.toFixed(2)}</span>
+                                </div>
+                                <div style="font-size:0.85rem;color:var(--text-muted);margin-left:8px;margin-bottom:8px;">
+                                    This month: -$${getAccountMonthlySpend(acc.id).toFixed(2)}
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+
+                    ${cashAccounts.length > 0 ? `
+                        <div style="margin-bottom:12px;">
+                            <div style="font-weight:600;margin-bottom:8px;color:var(--warning);">💵 Cash</div>
+                            ${cashAccounts.map(acc => `
+                                <div style="display:flex;justify-content:space-between;padding:8px;background:var(--surface);margin-bottom:4px;border-radius:4px;">
+                                    <span>${acc.account_name}</span>
+                                    <span style="font-weight:600;">$${acc.current_balance.toFixed(2)}</span>
+                                </div>
+                                <div style="font-size:0.85rem;color:var(--text-muted);margin-left:8px;margin-bottom:8px;">
+                                    This month: -$${getAccountMonthlySpend(acc.id).toFixed(2)}
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+
+                    ${store.budgetAccounts.length === 0 ? `
+                        <div style="text-align:center;color:var(--text-muted);padding:20px;">
+                            No accounts yet. Add one to track balances.
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+
+            <!-- Monthly Summary -->
+            <div class="budget-summary" style="margin-bottom:16px;">
                 <div class="card">
                     <div class="card-title" style="color:var(--success);">💰 Total Income</div>
                     <div class="budget-amount positive">$${totalIncome.toFixed(2)}</div>
@@ -5212,11 +5546,12 @@ function renderBudget(container) {
                     <div class="budget-amount negative">$${totalExpenses.toFixed(2)}</div>
                 </div>
                 <div class="card">
-                    <div class="card-title" style="color:var(--primary);">💵 Balance</div>
+                    <div class="card-title" style="color:var(--primary);">💵 Net Balance</div>
                     <div class="budget-amount ${balance >= 0 ? 'positive' : 'negative'}">$${balance.toFixed(2)}</div>
                 </div>
             </div>
-            
+
+            <!-- Navigation -->
             <div style="display:flex;gap:8px;margin-bottom:20px;">
                 <button class="btn btn-ghost" onclick="changeBudgetMonth(-1)">← Prev Month</button>
                 <button class="btn btn-ghost" onclick="jumpToCurrentBudgetMonth()">Current Month</button>
@@ -5225,14 +5560,16 @@ function renderBudget(container) {
             </div>
 
             <div style="margin:-8px 0 14px;font-size:0.95rem;color:var(--text-muted);">Showing: ${selectedLabel}</div>
-            
-            <div class="card">
+
+            <!-- Budget Entries -->
+            <div class="card" style="margin-bottom:16px;">
                 <div class="card-header">
                     <div class="card-title">📋 Budget Entries</div>
                 </div>
                 <div class="list-container">
                     ${monthEntries.map(entry => {
                         const isIncome = entry.entry_type === 'income';
+                        const account = store.budgetAccounts.find(a => a.id === entry.account_id);
                         return `
                             <div class="list-item">
                                 <div class="list-content">
@@ -5242,6 +5579,7 @@ function renderBudget(container) {
                                             ${isIncome ? '+' : '-'}$${parseFloat(entry.amount).toFixed(2)}
                                         </span>
                                         <span>🏷️ ${entry.category || 'Uncategorized'}</span>
+                                        ${account ? `<span>🏦 ${account.account_name}</span>` : ''}
                                         ${entry.due_date ? `<span>📅 ${new Date(entry.due_date).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}</span>` : ''}
                                         ${entry.is_recurring ? '<span>🔄 Recurring</span>' : ''}
                                     </div>
@@ -5251,33 +5589,22 @@ function renderBudget(container) {
                     }).join('') || '<div class="list-item"><div class="text-center" style="width:100%;color:var(--text-muted);">No budget entries for this month</div></div>'}
                 </div>
             </div>
-            
-            <div class="card" style="margin-top:16px;">
-                <div class="card-header">
-                    <div class="card-title">📝 Recent Transactions</div>
-                </div>
-                <div class="list-container">
-                    ${monthTransactions.map(t => `
-                        <div class="list-item">
-                            <div class="list-content">
-                                <div class="list-title">${t.description || 'Transaction'}</div>
-                                <div class="list-meta">
-                                    <span style="color:${t.amount > 0 ? 'var(--success)' : 'var(--danger)'};">
-                                        ${t.amount > 0 ? '+' : ''}$${parseFloat(t.amount).toFixed(2)}
-                                    </span>
-                                    <span>📅 ${new Date(t.created_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}</span>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('') || '<div class="list-item"><div class="text-center" style="width:100%;color:var(--text-muted);">No transactions for this month</div></div>'}
-                </div>
-            </div>
         </div>
     `;
 }
 
 function showAddBudgetModal() {
     if (!requireAddPermission()) return;
+
+    const accountOptions = store.budgetAccounts.map(acc =>
+        `<option value="${acc.id}">${acc.account_name} (${acc.account_type.toUpperCase()}) - $${acc.current_balance.toFixed(2)}</option>`
+    ).join('');
+
+    // Define bill categories inline to avoid scope issues
+    const billCategories = ['Electric', 'Gas', 'Water', 'Internet', 'Phone', 'Child Care', 'Car Payment', 'Mortgage', 'Rent', 'Car Insurance', 'Home Insurance', 'Pets', 'Other Bills'];
+    const billCategoryOptions = billCategories.map(cat =>
+        `<option value="${cat}">${cat}</option>`
+    ).join('');
 
     showModal('Add Budget Entry', `
         <div class="form-group">
@@ -5299,19 +5626,26 @@ function showAddBudgetModal() {
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label class="form-label">Category</label>
-                <select class="form-select" id="budgetCategory">
-                    <option value="Bills">Bills</option>
-                    <option value="Shopping">Shopping</option>
-                    <option value="Random">Random</option>
-                    <option value="Recurring">Recurring</option>
-                    <option value="Savings">Savings</option>
+                <label class="form-label">Account</label>
+                <select class="form-select" id="budgetAccount">
+                    <option value="">No Account</option>
+                    ${accountOptions}
                 </select>
             </div>
             <div class="form-group">
-                <label class="form-label">Due Date</label>
-                <input type="date" class="form-input" id="budgetDueDate">
+                <label class="form-label">Category</label>
+                <select class="form-select" id="budgetCategory">
+                    <option value="Bills">Bills</option>
+                    ${billCategoryOptions.map(cat => `<option value="${cat}">${cat}</option>`).join('')}
+                    <option value="Shopping">Shopping</option>
+                    <option value="Random">Random</option>
+                    <option value="Savings">Savings</option>
+                </select>
             </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Due Date</label>
+            <input type="date" class="form-input" id="budgetDueDate">
         </div>
         <div class="form-group">
             <label class="form-label">
@@ -5329,7 +5663,7 @@ function showAddBudgetModal() {
         </div>
         <button class="btn btn-primary w-full" onclick="submitBudget()">Add Entry</button>
     `);
-    
+
     document.getElementById('budgetRecurring').addEventListener('change', (e) => {
         document.getElementById('recurrenceTypeGroup').style.display = e.target.checked ? 'block' : 'none';
     });
@@ -5340,13 +5674,49 @@ async function submitBudget() {
     const amount = document.getElementById('budgetAmount').value;
     const entryType = document.getElementById('budgetType').value;
     const category = document.getElementById('budgetCategory').value;
+    const accountId = document.getElementById('budgetAccount').value || null;
     const dueDate = document.getElementById('budgetDueDate').value;
     const isRecurring = document.getElementById('budgetRecurring').checked;
     const recurrenceType = document.getElementById('budgetRecurrenceType').value;
-    
+
     if (!title || !amount) { alert('Title and amount are required'); return; }
-    
-    const success = await addBudgetEntry(title, amount, entryType, category, dueDate || null, isRecurring, isRecurring ? recurrenceType : 'none');
+
+    const success = await addBudgetEntry(title, amount, entryType, category, dueDate || null, isRecurring, isRecurring ? recurrenceType : 'none', accountId);
+    if (success) closeModal();
+}
+
+function showAddAccountModal() {
+    if (!requireAddPermission()) return;
+
+    showModal('Add Account', `
+        <div class="form-group">
+            <label class="form-label">Account Name *</label>
+            <input type="text" class="form-input" id="accountName" placeholder="e.g., Chase Checking">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Account Type *</label>
+            <select class="form-select" id="accountType">
+                <option value="bank">Bank Account</option>
+                <option value="ebt">EBT Card (Food Stamps)</option>
+                <option value="cash">Cash</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Current Balance</label>
+            <input type="number" class="form-input" id="accountBalance" placeholder="0.00" step="0.01">
+        </div>
+        <button class="btn btn-primary w-full" onclick="submitAccount()">Add Account</button>
+    `);
+}
+
+async function submitAccount() {
+    const name = document.getElementById('accountName').value.trim();
+    const type = document.getElementById('accountType').value;
+    const balance = document.getElementById('accountBalance').value;
+
+    if (!name) { alert('Account name is required'); return; }
+
+    const success = await addBudgetAccount(name, type, balance);
     if (success) closeModal();
 }
 
