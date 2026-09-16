@@ -5666,7 +5666,8 @@ function renderBudget(container) {
                             ${bankAccounts.map(acc => `
                                 <div style="display:flex;justify-content:space-between;padding:8px;background:var(--surface);margin-bottom:4px;border-radius:4px;">
                                     <span>${acc.account_name}</span>
-                                    <span style="font-weight:600;">$${acc.current_balance.toFixed(2)}</span>
+                                    <span style="font-weight:600;">$${Number(acc.current_balance).toFixed(2)}</span>
+                                    ${isFamilyAdmin() ? `<button class="btn btn-ghost btn-sm" onclick="showEditAccountBalanceModal('${acc.id}')" title="Edit balance">✏️</button>` : ''}
                                 </div>
                                 <div style="font-size:0.85rem;color:var(--text-muted);margin-left:8px;margin-bottom:8px;">
                                     This month: -$${getAccountMonthlySpend(acc.id).toFixed(2)}
@@ -5681,7 +5682,8 @@ function renderBudget(container) {
                             ${ebtAccounts.map(acc => `
                                 <div style="display:flex;justify-content:space-between;padding:8px;background:var(--surface);margin-bottom:4px;border-radius:4px;">
                                     <span>${acc.account_name}</span>
-                                    <span style="font-weight:600;">$${acc.current_balance.toFixed(2)}</span>
+                                    <span style="font-weight:600;">$${Number(acc.current_balance).toFixed(2)}</span>
+                                    ${isFamilyAdmin() ? `<button class="btn btn-ghost btn-sm" onclick="showEditAccountBalanceModal('${acc.id}')" title="Edit balance">✏️</button>` : ''}
                                 </div>
                                 <div style="font-size:0.85rem;color:var(--text-muted);margin-left:8px;margin-bottom:8px;">
                                     This month: -$${getAccountMonthlySpend(acc.id).toFixed(2)}
@@ -5696,7 +5698,8 @@ function renderBudget(container) {
                             ${cashAccounts.map(acc => `
                                 <div style="display:flex;justify-content:space-between;padding:8px;background:var(--surface);margin-bottom:4px;border-radius:4px;">
                                     <span>${acc.account_name}</span>
-                                    <span style="font-weight:600;">$${acc.current_balance.toFixed(2)}</span>
+                                    <span style="font-weight:600;">$${Number(acc.current_balance).toFixed(2)}</span>
+                                    ${isFamilyAdmin() ? `<button class="btn btn-ghost btn-sm" onclick="showEditAccountBalanceModal('${acc.id}')" title="Edit balance">✏️</button>` : ''}
                                 </div>
                                 <div style="font-size:0.85rem;color:var(--text-muted);margin-left:8px;margin-bottom:8px;">
                                     This month: -$${getAccountMonthlySpend(acc.id).toFixed(2)}
@@ -5885,6 +5888,53 @@ function showAddAccountModal() {
         </div>
         <button class="btn btn-primary w-full" onclick="submitAccount()">Add Account</button>
     `);
+}
+
+function showEditAccountBalanceModal(accountId) {
+    if (!isFamilyAdmin()) {
+        alert('Only family admins can edit account balances.');
+        return;
+    }
+
+    const account = store.budgetAccounts.find((item) => item.id === accountId);
+    if (!account) return;
+
+    showModal(`Edit ${account.account_name}`, `
+        <div class="form-group">
+            <label class="form-label">Current Balance</label>
+            <input type="number" class="form-input" id="editAccountBalance" value="${Number(account.current_balance).toFixed(2)}" step="0.01" inputmode="decimal">
+        </div>
+        <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:16px;">This is a manual balance correction. Future budget entries will continue to adjust this account.</div>
+        <div style="display:flex;gap:8px;">
+            <button class="btn btn-ghost w-full" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary w-full" onclick="saveAccountBalance('${accountId}')">Save Balance</button>
+        </div>
+    `);
+}
+
+async function saveAccountBalance(accountId) {
+    if (!isFamilyAdmin()) return;
+
+    const value = Number(document.getElementById('editAccountBalance').value);
+    if (!Number.isFinite(value)) {
+        alert('Enter a valid balance.');
+        return;
+    }
+
+    const { error } = await supabaseClient
+        .from('budget_accounts')
+        .update({ current_balance: value, updated_at: new Date().toISOString() })
+        .eq('id', accountId)
+        .eq('family_id', store.user.family_id);
+
+    if (error) {
+        alert(`Unable to update balance: ${error.message}`);
+        return;
+    }
+
+    await loadBudget();
+    closeModal();
+    renderPage('budget');
 }
 
 async function submitAccount() {
