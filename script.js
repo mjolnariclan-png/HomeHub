@@ -68,6 +68,45 @@ const BILL_CATEGORIES = [
 
 
 let signupMode = 'create';
+const PENDING_SIGNUP_STORAGE_KEY = 'homehub-pending-signup';
+
+function getPendingSignup() {
+    try {
+        const pending = JSON.parse(localStorage.getItem(PENDING_SIGNUP_STORAGE_KEY));
+        return pending?.mode && pending?.email ? pending : null;
+    } catch (error) {
+        localStorage.removeItem(PENDING_SIGNUP_STORAGE_KEY);
+        return null;
+    }
+}
+
+async function completePendingSignup(userId) {
+    const pending = getPendingSignup();
+    if (!pending) return false;
+
+    const rpcName = pending.mode === 'join' ? 'signup_join_family' : 'signup_create_family';
+    const params = pending.mode === 'join'
+        ? {
+            p_user_id: userId,
+            p_email: pending.email,
+            p_family_code: pending.familyCode
+        }
+        : {
+            p_user_id: userId,
+            p_email: pending.email,
+            p_family_name: pending.familyName || 'My Family'
+        };
+    const { error } = await supabaseClient.rpc(rpcName, params);
+
+    if (error) {
+        console.error('Account setup error:', error);
+        alert(error.message);
+        return false;
+    }
+
+    localStorage.removeItem(PENDING_SIGNUP_STORAGE_KEY);
+    return true;
+}
 
 function setSignupMode(mode) {
     signupMode = mode;
@@ -1276,39 +1315,19 @@ async function signup(e) {
     btn.disabled = true;
 
     try {
+        localStorage.setItem(PENDING_SIGNUP_STORAGE_KEY, JSON.stringify({
+            mode: signupMode,
+            email,
+            familyName,
+            familyCode: familyCode.trim().toUpperCase()
+        }));
+
         const { data, error } = await supabaseClient.auth.signUp({ email, password });
         if (error) throw error;
 
-        const userId = data.user.id;
-
-        if (signupMode === 'create') {
-            const { error } = await supabaseClient.rpc('signup_create_family', {
-                p_user_id: userId,
-                p_email: email,
-                p_family_name: familyName || 'My Family'
-            });
-
-            if (error) {
-                console.error("CREATE FAMILY ERROR:", error);
-                alert(error.message);
-                return;
-            }
-
-        } else {
-            const { error } = await supabaseClient.rpc('signup_join_family', {
-                p_user_id: userId,
-                p_email: email,
-                p_family_code: familyCode.trim().toUpperCase()
-            });
-
-            if (error) {
-                console.error("JOIN FAMILY ERROR:", error);
-                alert(error.message);
-                return;
-            }
-        }
-
-        alert('Account created! Please log in.');
+        alert(data.session
+            ? 'Account created! Finishing setup now.'
+            : 'Account created! Confirm your email, then log in to finish setup.');
 
     } catch (err) {
         alert(err.message);
@@ -1357,7 +1376,11 @@ async function bootstrapUser(userId) {
 
     try {
 
-    const profile = await loadUserProfile(userId);
+    let profile = await loadUserProfile(userId);
+
+    if (!profile && await completePendingSignup(userId)) {
+        profile = await loadUserProfile(userId);
+    }
 
     if (!profile) {
         console.error('Profile missing for user:', userId);
