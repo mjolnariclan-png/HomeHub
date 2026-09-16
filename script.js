@@ -6416,8 +6416,17 @@ function getPointsToNextLevel(currentPoints) {
 function setupSidebarToggle() {
     const sidebar = document.getElementById('sidebar');
     const backdrop = document.getElementById('sidebarBackdrop');
+    const menuButton = document.getElementById('mobileMenuBtn');
     let touchStartX = 0;
     let touchEndX = 0;
+
+    const setSidebarOpen = (isOpen) => {
+        sidebar.classList.toggle('open', isOpen);
+        backdrop?.classList.toggle('active', isOpen);
+        menuButton?.setAttribute('aria-expanded', String(isOpen));
+    };
+
+    menuButton?.addEventListener('click', () => setSidebarOpen(!sidebar.classList.contains('open')));
 
     // Swipe from left edge to open
     document.addEventListener('touchstart', (e) => {
@@ -6437,29 +6446,23 @@ function setupSidebarToggle() {
 
         if (diff > swipeThreshold && touchStartX < 60) {
             // Swiped right from left edge → open
-            sidebar.classList.add('open');
-            if (backdrop) backdrop.classList.add('active');
+            setSidebarOpen(true);
         } else if (diff < -swipeThreshold) {
             // Swiped left → close
-            sidebar.classList.remove('open');
-            if (backdrop) backdrop.classList.remove('active');
+            setSidebarOpen(false);
         }
     }
 
     // Backdrop closes menu
     if (backdrop) {
-        backdrop.addEventListener('click', () => {
-            sidebar.classList.remove('open');
-            backdrop.classList.remove('active');
-        });
+        backdrop.addEventListener('click', () => setSidebarOpen(false));
     }
 
     // Nav items close menu
     document.querySelectorAll('.nav-item').forEach((item) => {
         item.addEventListener('click', () => {
             setTimeout(() => {
-                sidebar.classList.remove('open');
-                if (backdrop) backdrop.classList.remove('active');
+                setSidebarOpen(false);
             }, 50);
         });
     });
