@@ -511,6 +511,8 @@ async function mediaObjectExists(path) {
 async function getSignedMediaUrl(path) {
     if (!path || !supabaseClient) return null;
 
+    if (!await mediaObjectExists(path)) return null;
+
     const { data, error } = await supabaseClient
         .storage
         .from(MEDIA_BUCKET)
