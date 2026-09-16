@@ -40,8 +40,8 @@ begin
   values (coalesce(nullif(trim(p_family_name), ''), 'My Family'), v_family_code)
   returning id into v_family_id;
 
-  insert into public.profiles (id, email, display_name, username, family_id, role)
-  values (p_user_id, p_email, v_display_name, v_display_name, v_family_id, 'admin')
+  insert into public.profiles (id, display_name, username, family_id, role)
+  values (p_user_id, v_display_name, v_display_name, v_family_id, 'admin')
   on conflict (id) do update
   set family_id = excluded.family_id,
       role = 'admin';
@@ -76,8 +76,8 @@ begin
 
   v_display_name := coalesce(nullif(split_part(p_email, '@', 1), ''), 'Family Member');
 
-  insert into public.profiles (id, email, display_name, username, family_id, role)
-  values (p_user_id, p_email, v_display_name, v_display_name, v_family_id, 'member')
+  insert into public.profiles (id, display_name, username, family_id, role)
+  values (p_user_id, v_display_name, v_display_name, v_family_id, 'member')
   on conflict (id) do update
   set family_id = excluded.family_id;
 end;
