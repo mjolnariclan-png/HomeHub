@@ -173,3 +173,5 @@ grant execute on function public.share_family_content(text, uuid, text, text) to
 grant execute on function public.get_shared_family_content(text) to authenticated;
 grant execute on function public.get_outgoing_family_shares() to authenticated;
 grant execute on function public.revoke_family_share(uuid) to authenticated;
+
+notify pgrst, 'reload schema';
