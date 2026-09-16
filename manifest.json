@@ -1,19 +1,19 @@
 {
   "name": "Family Assistant",
   "short_name": "FamHub",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "fullscreen",
   "background_color": "#004bfd",
   "theme_color": "#7d0000",
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "icon-192.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "/icon-512.png",
+      "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png"
     }
@@ -34,7 +34,7 @@
     "shopping",
     "utilities"
   ],
-  "id": "/",
+  "id": "./",
   "description": "Keep track of Chores, Shopping, To-Do items, Recipes, Calendars, Budgets.",
   "iarc_rating_id": "E"
 }
