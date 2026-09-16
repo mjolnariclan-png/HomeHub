@@ -46,6 +46,7 @@ const store = {
     displayPrefs: { size: 'normal', cardMode: 'surface' },
     cardBackgrounds: {},
     sharedChoreIdeas: [],
+    shareConnections: [],
     loading: {},
     channels: {},
     notificationChannels: {},
@@ -135,6 +136,66 @@ function hasHouseholdControlAccess(user = store.user) {
 
 function isFamilyAdmin(user = store.user) {
     return (user?.role || '').toLowerCase() === 'admin';
+}
+
+async function loadFamilyShareConnections() {
+    if (!isFamilyAdmin()) {
+        store.shareConnections = [];
+        return;
+    }
+    const { data, error } = await supabaseClient.rpc('get_family_share_connections');
+    if (error) {
+        console.warn('Family sharing connections unavailable:', error.message);
+        store.shareConnections = [];
+        return;
+    }
+    store.shareConnections = data || [];
+}
+
+function getAcceptedShareConnections() {
+    return store.shareConnections.filter((connection) => connection.status === 'accepted');
+}
+
+function renderShareRecipientsInput(inputId) {
+    const connections = getAcceptedShareConnections();
+    if (!isFamilyAdmin() || connections.length === 0) return '';
+    return `
+        <div class="form-group">
+            <label class="form-label">Also share with connected families</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                ${connections.map((connection) => `
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                        <input type="checkbox" name="${inputId}" value="${connection.family_code}">
+                        ${connection.family_name}
+                    </label>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function getSelectedShareRecipients(inputId) {
+    return Array.from(document.querySelectorAll(`input[name="${inputId}"]:checked`)).map((input) => input.value);
+}
+
+function renderCreateShareFields(contentType) {
+    return renderShareRecipientsInput(`new-${contentType}-share-recipients`);
+}
+
+function getCreateShareSelection(contentType) {
+    return getSelectedShareRecipients(`new-${contentType}-share-recipients`);
+}
+
+async function shareNewContent(resourceType, resourceId, familyCodes) {
+    if (!isFamilyAdmin() || familyCodes.length === 0) return;
+    const results = await Promise.all(familyCodes.map((familyCode) => supabaseClient.rpc('share_family_content', {
+        p_resource_type: resourceType,
+        p_resource_id: resourceId,
+        p_target_family_code: familyCode,
+        p_share_mode: 'live'
+    })));
+    const failed = results.find((result) => result.error);
+    if (failed) alert(`Item was created, but could not be shared: ${failed.error.message}`);
 }
 
 function canAddItems(user = store.user) {
@@ -1405,6 +1466,7 @@ async function bootstrapUser(userId) {
     store.family = null;
     store.userMedia = {};
     loadUserDisplayPrefs(userId);
+    await loadFamilyShareConnections();
     await loadCardBackgrounds(userId);
 
     // Load family once (if exists)
@@ -1729,6 +1791,7 @@ For the sauce, finely chop garlic...
 Pat the steak dry..." style="min-height:150px;"></textarea>
             </div>
         </div>
+        ${renderCreateShareFields('importRecipe')}
         
         <button class="btn btn-primary w-full" onclick="parseAndImportRecipe()">Parse & Import</button>
     `);
@@ -1863,6 +1926,8 @@ async function parseAndImportRecipe() {
         alert('Error: ' + error.message); 
         return; 
     }
+
+    await shareNewContent('recipe', data?.[0]?.id, getCreateShareSelection('importRecipe'));
     
     console.log('Inserted recipe:', data); // Debug
     
@@ -2123,7 +2188,7 @@ async function clearPurchasedItems() {
 }
 
 async function addChore(title, description, value, points, category, room, recurrence, assignedTo) {
-    const { error } = await supabaseClient.from('chores').insert({
+    const { data, error } = await supabaseClient.from('chores').insert({
         family_id: store.user.family_id,
         title, description,
         value: value || 0,
@@ -2132,11 +2197,11 @@ async function addChore(title, description, value, points, category, room, recur
         recurrence: recurrence || 'none',
         assigned_to: assignedTo || null,
         created_by: store.user.id
-    }).select();
+    }).select().single();
     if (error) { alert('Error: ' + error.message); return false; }
     await loadChores();
     renderPage('chores');
-    return true;
+    return data;
 }
 
 async function completeChore(choreId) {
@@ -2451,7 +2516,7 @@ async function addCalendarEvent(title, description, startTime, endTime, eventTyp
     
     await loadCalendarEvents();
     renderPage('calendar');
-    return true;
+    return data[0];
 }
 
 async function generateRecurringInstances(baseEvent, recurrence) {
@@ -3816,7 +3881,6 @@ function showEditChoreModal(choreId) {
         <div style="display:flex;gap:8px;">
             <button class="btn btn-primary w-full" onclick="submitEditChore('${choreId}')">Save Changes</button>
             <button class="btn btn-danger" onclick="deleteChore('${choreId}')">🗑️ Delete</button>
-            ${isFamilyAdmin() ? `<button class="btn btn-ghost" onclick="showShareContentModal('chore', '${choreId}', '${chore.title.replace(/'/g, "\\'")}')">🔗 Share</button>` : ''}
         </div>
     `);
 }
@@ -4106,6 +4170,7 @@ function showAddChoreModal() {
                     </select>
                 </div>
             </div>
+            ${renderCreateShareFields('chore')}
             <button class="btn btn-primary w-full" onclick="submitChore()">Add Chore</button>
         </div>
         
@@ -4295,11 +4360,15 @@ async function submitChore() {
     const room = document.getElementById('choreRoom').value;
     const recurrence = document.getElementById('choreRecurrence').value;
     const assignedTo = document.getElementById('choreAssignedTo').value;
+    const shareRecipients = getCreateShareSelection('chore');
     
     if (!title) { alert('Title is required'); return; }
     
-    const success = await addChore(title, description, value, points, category, room, recurrence, assignedTo || null);
-    if (success) closeModal();
+    const chore = await addChore(title, description, value, points, category, room, recurrence, assignedTo || null);
+    if (chore) {
+        await shareNewContent('chore', chore.id, shareRecipients);
+        closeModal();
+    }
 }
 
 async function submitMultiChore() {
@@ -4436,7 +4505,6 @@ function renderRecipeSection(title, recipes) {
                                     ${recipe.shared ? '' : `
                                         <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); showEditRecipeModal('${recipe.id}')">✏️ Edit</button>
                                         <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteRecipe('${recipe.id}')">🗑️ Delete</button>
-                                        ${isFamilyAdmin() ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); showShareContentModal('recipe', '${recipe.id}', '${recipe.name.replace(/'/g, "\\'")}')">🔗 Share</button>` : ''}
                                     `}
                                 </div>
                             </div>
@@ -4582,6 +4650,7 @@ function showAddRecipeModal() {
             <label class="form-label">Instructions</label>
             <textarea class="form-textarea" id="recipeInstructions" placeholder="Step by step instructions..."></textarea>
         </div>
+        ${renderCreateShareFields('recipe')}
         <button class="btn btn-primary w-full" onclick="submitRecipe()">Add Recipe</button>
     `);
 }
@@ -4702,7 +4771,7 @@ async function submitRecipe() {
         }
     }
     
-    const { error } = await supabaseClient.from('recipes').insert({
+    const { data, error } = await supabaseClient.from('recipes').insert({
         family_id: store.user.family_id,
         name,
         food_type: foodType,
@@ -4718,6 +4787,8 @@ async function submitRecipe() {
     }).select();
     
     if (error) { alert('Error: ' + error.message); return false; }
+
+    await shareNewContent('recipe', data?.[0]?.id, getCreateShareSelection('recipe'));
     
     await loadRecipes();
     renderPage('recipes');
@@ -5275,6 +5346,7 @@ function showAddEventModal(prefillDate = null) {
                 </select>
             </div>
         </div>
+        ${renderCreateShareFields('calendarEvent')}
         <button class="btn btn-primary w-full" onclick="submitEvent()">Add Event</button>
     `);
 }
@@ -5353,7 +5425,6 @@ function showEditEventModal(eventId) {
         <div style="display:flex;gap:8px;">
             <button class="btn btn-primary w-full" onclick="submitEditEvent('${eventId}')">Save Changes</button>
             <button class="btn btn-danger" onclick="deleteEvent('${eventId}')">🗑️ Delete</button>
-            ${isFamilyAdmin() ? `<button class="btn btn-ghost" onclick="showShareContentModal('calendar_event', '${eventId}', '${event.title.replace(/'/g, "\\'")}')">🔗 Share</button>` : ''}
         </div>
     `);
 }
@@ -5427,6 +5498,7 @@ async function submitEvent() {
     const location = document.getElementById('eventLocation').value.trim();
     const assignedTo = document.getElementById('eventAssignedTo').value;
     const recurrence = document.getElementById('eventRecurrence').value;
+    const shareRecipients = getCreateShareSelection('calendarEvent');
     
     if (!title || !startTime) { alert('Title and start time are required'); return; }
     
@@ -5449,8 +5521,11 @@ async function submitEvent() {
     const isoStart = toUTCString(startTime);
     const isoEnd = toUTCString(endTime);
     
-    const success = await addCalendarEvent(title, description, isoStart, isoEnd, eventType, location || null, assignedTo || null, recurrence || 'none');
-    if (success) closeModal();
+    const event = await addCalendarEvent(title, description, isoStart, isoEnd, eventType, location || null, assignedTo || null, recurrence || 'none');
+    if (event) {
+        await shareNewContent('calendar_event', event.id, shareRecipients);
+        closeModal();
+    }
 }
 
 
@@ -5965,6 +6040,67 @@ async function revokeFamilyShare(shareId) {
     await showOutgoingFamilyShares();
 }
 
+async function showFamilySharingConnections() {
+    if (!isFamilyAdmin()) return;
+    await loadFamilyShareConnections();
+
+    showModal('Family Sharing Connections', `
+        <div class="form-group">
+            <label class="form-label">Connect another family</label>
+            <div style="display:flex;gap:8px;">
+                <input class="form-input" id="connectionFamilyCode" autocapitalize="characters" placeholder="Their family code">
+                <button class="btn btn-primary" onclick="requestFamilyShareConnection()">Invite</button>
+            </div>
+        </div>
+        <div class="list-container">
+            ${store.shareConnections.map((connection) => `
+                <div class="list-item">
+                    <div class="list-content">
+                        <div class="list-title">${connection.family_name}</div>
+                        <div class="list-meta"><span>${connection.status}</span><span>${connection.direction}</span></div>
+                    </div>
+                    ${connection.status === 'pending' && connection.direction === 'incoming'
+                        ? `<button class="btn btn-primary btn-sm" onclick="acceptFamilyShareConnection('${connection.connection_id}')">Accept</button>`
+                        : `<button class="btn btn-danger btn-sm" onclick="removeFamilyShareConnection('${connection.connection_id}')">Remove</button>`}
+                </div>
+            `).join('') || '<div class="empty-state-small">No family connections yet.</div>'}
+        </div>
+    `);
+}
+
+async function requestFamilyShareConnection() {
+    const code = document.getElementById('connectionFamilyCode').value.trim().toUpperCase();
+    if (!code) {
+        alert('Enter the other family\'s code.');
+        return;
+    }
+    const { error } = await supabaseClient.rpc('request_family_share_connection', { p_target_family_code: code });
+    if (error) {
+        alert(`Unable to send invitation: ${error.message}`);
+        return;
+    }
+    await showFamilySharingConnections();
+}
+
+async function acceptFamilyShareConnection(connectionId) {
+    const { error } = await supabaseClient.rpc('accept_family_share_connection', { p_connection_id: connectionId });
+    if (error) {
+        alert(`Unable to accept invitation: ${error.message}`);
+        return;
+    }
+    await showFamilySharingConnections();
+}
+
+async function removeFamilyShareConnection(connectionId) {
+    if (!confirm('Remove this family connection? Existing shared items will remain until separately revoked.')) return;
+    const { error } = await supabaseClient.rpc('remove_family_share_connection', { p_connection_id: connectionId });
+    if (error) {
+        alert(`Unable to remove connection: ${error.message}`);
+        return;
+    }
+    await showFamilySharingConnections();
+}
+
 function renderAdmin(container) {
     const role = (store.user?.role || '').toLowerCase();
     const isAdmin = role === 'admin';
@@ -6081,8 +6217,8 @@ function renderAdmin(container) {
         html += `
             <div class="card" style="${getCardBackgroundStyle('admin_family')}">
                 <div class="card-header"><div class="card-title">🔗 Family Sharing</div></div>
-                <div style="color:var(--text-muted);font-size:0.875rem;margin-bottom:16px;">Share individual recipes, chore ideas, and calendar events with another family. Choose live updates or a saved snapshot.</div>
-                <button class="btn btn-primary w-full" onclick="showOutgoingFamilyShares()">Manage Shared Items</button>
+                <div style="color:var(--text-muted);font-size:0.875rem;margin-bottom:16px;">Connect with another family using its code. Both family admins approve the connection before new recipes, chores, or calendar events can be shared.</div>
+                <button class="btn btn-primary w-full" onclick="showFamilySharingConnections()">Manage Family Connections</button>
             </div>
         `;
     }

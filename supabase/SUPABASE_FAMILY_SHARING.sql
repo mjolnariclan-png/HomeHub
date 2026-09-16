@@ -20,6 +20,21 @@ create index if not exists family_shares_target_active_idx
   on public.family_shares (target_family_id, resource_type)
   where revoked_at is null;
 
+create table if not exists public.family_share_connections (
+  id uuid primary key default gen_random_uuid(),
+  requesting_family_id uuid not null references public.families(id) on delete cascade,
+  receiving_family_id uuid not null references public.families(id) on delete cascade,
+  requested_by uuid not null references public.profiles(id),
+  accepted_by uuid references public.profiles(id),
+  status text not null default 'pending' check (status in ('pending', 'accepted')),
+  created_at timestamptz not null default now(),
+  accepted_at timestamptz,
+  constraint family_share_connections_different_families check (requesting_family_id <> receiving_family_id),
+  constraint family_share_connections_unique_pair unique (requesting_family_id, receiving_family_id)
+);
+
+alter table public.family_share_connections enable row level security;
+
 alter table public.family_shares enable row level security;
 
 create or replace function public.share_family_content(
@@ -58,6 +73,15 @@ begin
     raise exception 'Choose a different family';
   end if;
 
+  if not exists (
+    select 1 from public.family_share_connections c
+    where c.status = 'accepted'
+      and ((c.requesting_family_id = v_source_family_id and c.receiving_family_id = v_target_family_id)
+        or (c.requesting_family_id = v_target_family_id and c.receiving_family_id = v_source_family_id))
+  ) then
+    raise exception 'This family has not accepted your sharing connection';
+  end if;
+
   if p_resource_type = 'recipe' then
     select to_jsonb(recipes.*) into v_payload
     from public.recipes
@@ -85,6 +109,80 @@ begin
   )
   on conflict (source_family_id, target_family_id, resource_type, resource_id, share_mode)
   do update set snapshot = excluded.snapshot, created_by = excluded.created_by, created_at = now(), revoked_at = null;
+end;
+$$;
+
+create or replace function public.request_family_share_connection(p_target_family_code text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_source_family_id uuid;
+  v_target_family_id uuid;
+begin
+  select family_id into v_source_family_id from public.profiles where id = auth.uid() and role = 'admin';
+  if v_source_family_id is null then raise exception 'Only family admins can connect families'; end if;
+
+  select id into v_target_family_id from public.families where family_code = upper(trim(p_target_family_code));
+  if v_target_family_id is null then raise exception 'Family code not found'; end if;
+  if v_target_family_id = v_source_family_id then raise exception 'Choose a different family'; end if;
+
+  if exists (
+    select 1 from public.family_share_connections
+    where (requesting_family_id = v_source_family_id and receiving_family_id = v_target_family_id)
+       or (requesting_family_id = v_target_family_id and receiving_family_id = v_source_family_id)
+  ) then raise exception 'A sharing connection already exists or is pending'; end if;
+
+  insert into public.family_share_connections (requesting_family_id, receiving_family_id, requested_by)
+  values (v_source_family_id, v_target_family_id, auth.uid());
+end;
+$$;
+
+create or replace function public.accept_family_share_connection(p_connection_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.family_share_connections c
+  set status = 'accepted', accepted_by = auth.uid(), accepted_at = now()
+  from public.profiles p
+  where c.id = p_connection_id and c.receiving_family_id = p.family_id
+    and p.id = auth.uid() and p.role = 'admin' and c.status = 'pending';
+  if not found then raise exception 'Connection request not found or not permitted'; end if;
+end;
+$$;
+
+create or replace function public.get_family_share_connections()
+returns table (connection_id uuid, family_name text, family_code text, status text, direction text)
+language sql
+security definer
+set search_path = public
+as $$
+  select c.id, f.name, f.family_code, c.status,
+    case when c.requesting_family_id = p.family_id then 'outgoing' else 'incoming' end
+  from public.family_share_connections c
+  join public.profiles p on p.id = auth.uid() and p.role = 'admin'
+  join public.families f on f.id = case when c.requesting_family_id = p.family_id then c.receiving_family_id else c.requesting_family_id end
+  where c.requesting_family_id = p.family_id or c.receiving_family_id = p.family_id
+  order by c.status, f.name;
+$$;
+
+create or replace function public.remove_family_share_connection(p_connection_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.family_share_connections c
+  using public.profiles p
+  where c.id = p_connection_id and p.id = auth.uid() and p.role = 'admin'
+    and (c.requesting_family_id = p.family_id or c.receiving_family_id = p.family_id);
+  if not found then raise exception 'Connection not found or not permitted'; end if;
 end;
 $$;
 
@@ -169,9 +267,14 @@ end;
 $$;
 
 revoke all on public.family_shares from anon, authenticated;
+revoke all on public.family_share_connections from anon, authenticated;
 grant execute on function public.share_family_content(text, uuid, text, text) to authenticated;
 grant execute on function public.get_shared_family_content(text) to authenticated;
 grant execute on function public.get_outgoing_family_shares() to authenticated;
 grant execute on function public.revoke_family_share(uuid) to authenticated;
+grant execute on function public.request_family_share_connection(text) to authenticated;
+grant execute on function public.accept_family_share_connection(uuid) to authenticated;
+grant execute on function public.get_family_share_connections() to authenticated;
+grant execute on function public.remove_family_share_connection(uuid) to authenticated;
 
 notify pgrst, 'reload schema';
