@@ -170,12 +170,21 @@ function renderShareRecipientsInput(inputId) {
                     </label>
                 `).join('')}
             </div>
+            <label class="form-label" style="margin-top:12px;">Share mode</label>
+            <select class="form-select" id="${inputId}-mode">
+                <option value="live">Live updates</option>
+                <option value="snapshot">Snapshot</option>
+            </select>
         </div>
     `;
 }
 
 function getSelectedShareRecipients(inputId) {
     return Array.from(document.querySelectorAll(`input[name="${inputId}"]:checked`)).map((input) => input.value);
+}
+
+function getSelectedShareMode(inputId) {
+    return document.getElementById(`${inputId}-mode`)?.value || 'live';
 }
 
 function renderCreateShareFields(contentType) {
@@ -186,13 +195,17 @@ function getCreateShareSelection(contentType) {
     return getSelectedShareRecipients(`new-${contentType}-share-recipients`);
 }
 
-async function shareNewContent(resourceType, resourceId, familyCodes) {
+function getCreateShareMode(contentType) {
+    return getSelectedShareMode(`new-${contentType}-share-recipients`);
+}
+
+async function shareNewContent(resourceType, resourceId, familyCodes, shareMode = 'live') {
     if (!isFamilyAdmin() || familyCodes.length === 0) return;
     const results = await Promise.all(familyCodes.map((familyCode) => supabaseClient.rpc('share_family_content', {
         p_resource_type: resourceType,
         p_resource_id: resourceId,
         p_target_family_code: familyCode,
-        p_share_mode: 'live'
+        p_share_mode: shareMode
     })));
     const failed = results.find((result) => result.error);
     if (failed) alert(`Item was created, but could not be shared: ${failed.error.message}`);
@@ -1927,7 +1940,7 @@ async function parseAndImportRecipe() {
         return; 
     }
 
-    await shareNewContent('recipe', data?.[0]?.id, getCreateShareSelection('importRecipe'));
+    await shareNewContent('recipe', data?.[0]?.id, getCreateShareSelection('importRecipe'), getCreateShareMode('importRecipe'));
     
     console.log('Inserted recipe:', data); // Debug
     
@@ -2008,7 +2021,7 @@ async function loadStoreItems() {
         .order('created_at', { ascending: false });
     
     if (error) { console.error('Error loading store:', error); return; }
-    store.storeItems = data || [];
+    store.storeItems = [...(data || []), ...await loadSharedContent('shop_item')];
 }
 
 async function loadSharedIngredients() {
@@ -2627,16 +2640,16 @@ async function updateAccountBalance(accountId, amount, isExpense) {
 }
 
 async function addStoreItem(name, description, price) {
-    const { error } = await supabaseClient.from('shop_items').insert({
+    const { data, error } = await supabaseClient.from('shop_items').insert({
         family_id: store.user.family_id,
         name, description,
         price: parseFloat(price),
         created_by: store.user.id
-    }).select();
+    }).select().single();
     if (error) { alert('Error: ' + error.message); return false; }
     await loadStoreItems();
     renderPage('store');
-    return true;
+    return data;
 }
 
 async function purchaseStoreItem(itemId, price) {
@@ -3881,6 +3894,7 @@ function showEditChoreModal(choreId) {
         <div style="display:flex;gap:8px;">
             <button class="btn btn-primary w-full" onclick="submitEditChore('${choreId}')">Save Changes</button>
             <button class="btn btn-danger" onclick="deleteChore('${choreId}')">🗑️ Delete</button>
+            ${isFamilyAdmin() ? `<button class="btn btn-ghost" onclick="showShareContentModal('chore', '${choreId}', '${chore.title.replace(/'/g, "\\'")}')">Manage Sharing</button>` : ''}
         </div>
     `);
 }
@@ -4366,7 +4380,7 @@ async function submitChore() {
     
     const chore = await addChore(title, description, value, points, category, room, recurrence, assignedTo || null);
     if (chore) {
-        await shareNewContent('chore', chore.id, shareRecipients);
+        await shareNewContent('chore', chore.id, shareRecipients, getCreateShareMode('chore'));
         closeModal();
     }
 }
@@ -4505,6 +4519,7 @@ function renderRecipeSection(title, recipes) {
                                     ${recipe.shared ? '' : `
                                         <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); showEditRecipeModal('${recipe.id}')">✏️ Edit</button>
                                         <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteRecipe('${recipe.id}')">🗑️ Delete</button>
+                                        ${isFamilyAdmin() ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); showShareContentModal('recipe', '${recipe.id}', '${recipe.name.replace(/'/g, "\\'")}')">Manage Sharing</button>` : ''}
                                     `}
                                 </div>
                             </div>
@@ -4788,7 +4803,7 @@ async function submitRecipe() {
     
     if (error) { alert('Error: ' + error.message); return false; }
 
-    await shareNewContent('recipe', data?.[0]?.id, getCreateShareSelection('recipe'));
+    await shareNewContent('recipe', data?.[0]?.id, getCreateShareSelection('recipe'), getCreateShareMode('recipe'));
     
     await loadRecipes();
     renderPage('recipes');
@@ -5428,6 +5443,7 @@ function showEditEventModal(eventId) {
         <div style="display:flex;gap:8px;">
             <button class="btn btn-primary w-full" onclick="submitEditEvent('${eventId}')">Save Changes</button>
             <button class="btn btn-danger" onclick="deleteEvent('${eventId}')">🗑️ Delete</button>
+            ${isFamilyAdmin() ? `<button class="btn btn-ghost" onclick="showShareContentModal('calendar_event', '${eventId}', '${event.title.replace(/'/g, "\\'")}')">Manage Sharing</button>` : ''}
         </div>
     `);
 }
@@ -5526,7 +5542,7 @@ async function submitEvent() {
     
     const event = await addCalendarEvent(title, description, isoStart, isoEnd, eventType, location || null, assignedTo || null, recurrence || 'none');
     if (event) {
-        await shareNewContent('calendar_event', event.id, shareRecipients);
+        await shareNewContent('calendar_event', event.id, shareRecipients, getCreateShareMode('calendarEvent'));
         closeModal();
     }
 }
@@ -5901,11 +5917,13 @@ function renderStore(container) {
                         <div style="font-weight:600;font-size:1.125rem;margin-bottom:4px;">${item.name}</div>
                         <div style="color:var(--text-muted);font-size:0.875rem;margin-bottom:12px;">${item.description || ''}</div>
                         <div class="store-price">$${parseFloat(item.price).toFixed(2)}</div>
+                        ${item.shared ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:10px;">🔗 Shared by ${item.shared_from} (${item.share_mode})</div>` : `
                         <button class="btn btn-primary w-full" 
                                 onclick="purchaseStoreItem('${item.id}', ${item.price})"
                                 ${(store.user?.balance || 0) < item.price ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>
                             ${(store.user?.balance || 0) < item.price ? 'Not Enough $' : 'Purchase'}
-                        </button>
+                        </button>`}
+                        ${isFamilyAdmin() && !item.shared ? `<button class="btn btn-ghost w-full" style="margin-top:8px;" onclick="showShareContentModal('shop_item', '${item.id}', '${item.name.replace(/'/g, "\\'")}')">Manage Sharing</button>` : ''}
                     </div>
                 `).join('') || emptyState('🏪', 'Store Empty', 'Add items for kids to purchase')}
             </div>
@@ -5935,6 +5953,7 @@ function showAddStoreItemModal() {
             <label class="form-label">Price ($) *</label>
             <input type="number" class="form-input" id="storeItemPrice" placeholder="0.00" step="0.01" min="0">
         </div>
+        ${renderCreateShareFields('shopItem')}
         <button class="btn btn-primary w-full" onclick="submitStoreItem()">Add Item</button>
     `);
 }
@@ -5943,68 +5962,68 @@ async function submitStoreItem() {
     const name = document.getElementById('storeItemName').value.trim();
     const description = document.getElementById('storeItemDescription').value.trim();
     const price = document.getElementById('storeItemPrice').value;
+    const shareRecipients = getCreateShareSelection('shopItem');
     
     if (!name || !price) { alert('Name and price are required'); return; }
     
-    const success = await addStoreItem(name, description, price);
-    if (success) closeModal();
+    const item = await addStoreItem(name, description, price);
+    if (item) {
+        await shareNewContent('shop_item', item.id, shareRecipients, getCreateShareMode('shopItem'));
+        closeModal();
+    }
 }
 
-function showShareContentModal(resourceType, resourceId, resourceName) {
+async function showShareContentModal(resourceType, resourceId, resourceName) {
     if (!isFamilyAdmin()) {
         alert('Only family admins can share content.');
+        return;
+    }
+
+    await loadFamilyShareConnections();
+    const { data: existingShares, error } = await supabaseClient.rpc('get_content_family_shares', {
+        p_resource_type: resourceType,
+        p_resource_id: resourceId
+    });
+    if (error) {
+        alert(`Unable to load sharing: ${error.message}`);
         return;
     }
 
     const labels = {
         recipe: 'Recipe',
         chore: 'Chore Idea',
-        calendar_event: 'Calendar Event'
+        calendar_event: 'Calendar Event',
+        shop_item: 'Kid Store Item'
     };
     showModal(`Share ${labels[resourceType] || 'Content'}`, `
         <div class="form-group">
             <label class="form-label">Sharing</label>
             <input class="form-input" value="${resourceName}" disabled>
         </div>
-        <div class="form-group">
-            <label class="form-label">Recipient Family Code</label>
-            <input class="form-input" id="shareFamilyCode" maxlength="32" autocapitalize="characters" placeholder="Enter their family code">
+        ${renderShareRecipientsInput('existing-share-recipients')}
+        ${getAcceptedShareConnections().length > 0 ? `<button class="btn btn-primary w-full" onclick="submitShareContent('${resourceType}', '${resourceId}')">Share with Selected Families</button>` : '<div class="empty-state-small">Connect and receive approval from another family admin before sharing.</div>'}
+        <div class="list-container" style="margin-top:16px;">
+            ${(existingShares || []).map((share) => `
+                <div class="list-item">
+                    <div class="list-content"><div class="list-title">${share.target_family_name}</div><div class="list-meta"><span>${share.share_mode}</span></div></div>
+                    <button class="btn btn-danger btn-sm" onclick="revokeFamilyShare('${share.share_id}'); showShareContentModal('${resourceType}', '${resourceId}', '${resourceName.replace(/'/g, "\\'")}')">Remove</button>
+                </div>
+            `).join('') || ''}
         </div>
-        <div class="form-group">
-            <label class="form-label">Share Mode</label>
-            <select class="form-select" id="shareMode">
-                <option value="live">Live: recipients see future updates</option>
-                <option value="snapshot">Snapshot: preserve this version</option>
-            </select>
-        </div>
-        <button class="btn btn-primary w-full" onclick="submitShareContent('${resourceType}', '${resourceId}')">Share</button>
     `);
 }
 
 async function submitShareContent(resourceType, resourceId) {
     if (!isFamilyAdmin()) return;
 
-    const familyCode = document.getElementById('shareFamilyCode').value.trim().toUpperCase();
-    const shareMode = document.getElementById('shareMode').value;
-    if (!familyCode) {
-        alert('Enter the recipient family code.');
+    const familyCodes = getSelectedShareRecipients('existing-share-recipients');
+    if (familyCodes.length === 0) {
+        alert('Choose at least one connected family.');
         return;
     }
-
-    const { error } = await supabaseClient.rpc('share_family_content', {
-        p_resource_type: resourceType,
-        p_resource_id: resourceId,
-        p_target_family_code: familyCode,
-        p_share_mode: shareMode
-    });
-
-    if (error) {
-        alert(`Unable to share: ${error.message}`);
-        return;
-    }
-
+    await shareNewContent(resourceType, resourceId, familyCodes, getSelectedShareMode('existing-share-recipients'));
     closeModal();
-    alert('Content shared.');
+    alert('Sharing updated.');
 }
 
 async function showOutgoingFamilyShares() {

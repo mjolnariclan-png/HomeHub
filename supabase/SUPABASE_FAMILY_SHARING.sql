@@ -5,7 +5,7 @@ create table if not exists public.family_shares (
   id uuid primary key default gen_random_uuid(),
   source_family_id uuid not null references public.families(id) on delete cascade,
   target_family_id uuid not null references public.families(id) on delete cascade,
-  resource_type text not null check (resource_type in ('recipe', 'chore', 'calendar_event')),
+  resource_type text not null check (resource_type in ('recipe', 'chore', 'calendar_event', 'shop_item')),
   resource_id uuid not null,
   share_mode text not null check (share_mode in ('live', 'snapshot')),
   snapshot jsonb not null,
@@ -15,6 +15,12 @@ create table if not exists public.family_shares (
   constraint family_shares_different_families check (source_family_id <> target_family_id),
   constraint family_shares_unique_resource unique (source_family_id, target_family_id, resource_type, resource_id, share_mode)
 );
+
+alter table public.family_shares
+  drop constraint if exists family_shares_resource_type_check;
+alter table public.family_shares
+  add constraint family_shares_resource_type_check
+  check (resource_type in ('recipe', 'chore', 'calendar_event', 'shop_item'));
 
 create index if not exists family_shares_target_active_idx
   on public.family_shares (target_family_id, resource_type)
@@ -93,6 +99,10 @@ begin
   elsif p_resource_type = 'calendar_event' then
     select to_jsonb(calendar_events.*) - 'assigned_to' - 'created_by' into v_payload
     from public.calendar_events
+    where id = p_resource_id and family_id = v_source_family_id;
+  elsif p_resource_type = 'shop_item' then
+    select to_jsonb(shop_items.*) - 'created_by' into v_payload
+    from public.shop_items
     where id = p_resource_id and family_id = v_source_family_id;
   else
     raise exception 'Unsupported content type';
@@ -215,6 +225,7 @@ begin
       when fs.resource_type = 'recipe' then (select to_jsonb(r.*) from public.recipes r where r.id = fs.resource_id and r.family_id = fs.source_family_id)
       when fs.resource_type = 'chore' then (select to_jsonb(c.*) - 'assigned_to' - 'created_by' from public.chores c where c.id = fs.resource_id and c.family_id = fs.source_family_id)
       when fs.resource_type = 'calendar_event' then (select to_jsonb(e.*) - 'assigned_to' - 'created_by' from public.calendar_events e where e.id = fs.resource_id and e.family_id = fs.source_family_id)
+      when fs.resource_type = 'shop_item' then (select to_jsonb(i.*) - 'created_by' from public.shop_items i where i.id = fs.resource_id and i.family_id = fs.source_family_id)
     end
   from public.family_shares fs
   join public.families f on f.id = fs.source_family_id
@@ -266,11 +277,33 @@ begin
 end;
 $$;
 
+create or replace function public.get_content_family_shares(
+  p_resource_type text,
+  p_resource_id uuid
+)
+returns table (share_id uuid, target_family_name text, share_mode text)
+language sql
+security definer
+set search_path = public
+as $$
+  select fs.id, f.name, fs.share_mode
+  from public.family_shares fs
+  join public.families f on f.id = fs.target_family_id
+  join public.profiles p on p.family_id = fs.source_family_id
+  where p.id = auth.uid()
+    and p.role = 'admin'
+    and fs.resource_type = p_resource_type
+    and fs.resource_id = p_resource_id
+    and fs.revoked_at is null
+  order by f.name, fs.share_mode;
+$$;
+
 revoke all on public.family_shares from anon, authenticated;
 revoke all on public.family_share_connections from anon, authenticated;
 grant execute on function public.share_family_content(text, uuid, text, text) to authenticated;
 grant execute on function public.get_shared_family_content(text) to authenticated;
 grant execute on function public.get_outgoing_family_shares() to authenticated;
+grant execute on function public.get_content_family_shares(text, uuid) to authenticated;
 grant execute on function public.revoke_family_share(uuid) to authenticated;
 grant execute on function public.request_family_share_connection(text) to authenticated;
 grant execute on function public.accept_family_share_connection(uuid) to authenticated;
