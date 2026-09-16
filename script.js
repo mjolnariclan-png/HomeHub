@@ -45,6 +45,7 @@ const store = {
     userMedia: {},
     displayPrefs: { size: 'normal', cardMode: 'surface' },
     cardBackgrounds: {},
+    sharedChoreIdeas: [],
     loading: {},
     channels: {},
     notificationChannels: {},
@@ -130,6 +131,10 @@ function getCardStoragePath(userId, cardKey) {
 function hasHouseholdControlAccess(user = store.user) {
     const role = (user?.role || '').toLowerCase();
     return role === 'admin' || role === 'parent' || role === 'adult';
+}
+
+function isFamilyAdmin(user = store.user) {
+    return (user?.role || '').toLowerCase() === 'admin';
 }
 
 function canAddItems(user = store.user) {
@@ -1603,6 +1608,7 @@ async function loadChores() {
     }
 
     store.loading.chores = false;
+    store.sharedChoreIdeas = await loadSharedContent('chore');
 }
 
 async function loadShoppingList() {
@@ -1633,16 +1639,38 @@ async function loadTodos() {
 }
 
 async function loadRecipes() {
-    // Admin family sees all recipes, others see their own + admin recipes
-    const adminFamilyId = 'd6090e1c-175e-42a9-8477-b53aed5b3c09'; // Your admin family code
     const { data, error } = await supabaseClient
         .from('recipes')
         .select('*')
-        .or(`family_id.eq.${store.user.family_id},family_id.eq.${adminFamilyId}`)
+        .eq('family_id', store.user.family_id)
         .order('created_at', { ascending: false });
     
     if (error) { console.error('Error loading recipes:', error); return; }
-    store.recipes = data || [];
+    store.recipes = [...(data || []), ...await loadSharedContent('recipe')];
+}
+
+async function loadSharedContent(resourceType) {
+    const { data, error } = await supabaseClient.rpc('get_shared_family_content', {
+        p_resource_type: resourceType
+    });
+
+    if (error) {
+        console.warn(`Shared ${resourceType} load skipped:`, error.message);
+        return [];
+    }
+
+    return (data || []).flatMap((share) => {
+        const payload = typeof share.payload === 'string' ? JSON.parse(share.payload) : share.payload;
+        return payload ? [{
+            ...payload,
+            id: `shared-${share.share_id}`,
+            shared: true,
+            share_id: share.share_id,
+            shared_from: share.source_family_name,
+            share_mode: share.share_mode,
+            assigned_to: null
+        }] : [];
+    });
 }
 
 function showImportRecipeModal() {
@@ -1858,7 +1886,7 @@ async function loadCalendarEvents() {
         .order('start_time', { ascending: true });
     
     if (error) { console.error('Error loading calendar:', error); return; }
-    store.calendarEvents = data || [];
+    store.calendarEvents = [...(data || []), ...await loadSharedContent('calendar_event')];
 }
 
 async function loadBudgetAccounts() {
@@ -3588,6 +3616,29 @@ function renderChores(container) {
         `;
     }
 
+    if (store.sharedChoreIdeas.length > 0) {
+        html += `
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-header"><div class="card-title">🔗 Shared Chore Ideas</div></div>
+                <div class="list-container">
+                    ${store.sharedChoreIdeas.map(chore => `
+                        <div class="list-item">
+                            <div class="list-content">
+                                <div class="list-title">${chore.title}</div>
+                                <div class="list-meta">
+                                    <span>Shared by ${chore.shared_from}</span>
+                                    <span>${chore.share_mode}</span>
+                                    <span>🏷️ ${chore.category || 'General'}</span>
+                                </div>
+                                ${chore.description ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">${chore.description}</div>` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
     // Pending Approvals (admins only, at top)
     if (isAdmin && !isTabletMode() && store.pendingCompletions?.length > 0) {
         html += `
@@ -3765,6 +3816,7 @@ function showEditChoreModal(choreId) {
         <div style="display:flex;gap:8px;">
             <button class="btn btn-primary w-full" onclick="submitEditChore('${choreId}')">Save Changes</button>
             <button class="btn btn-danger" onclick="deleteChore('${choreId}')">🗑️ Delete</button>
+            ${isFamilyAdmin() ? `<button class="btn btn-ghost" onclick="showShareContentModal('chore', '${choreId}', '${chore.title.replace(/'/g, "\\'")}')">🔗 Share</button>` : ''}
         </div>
     `);
 }
@@ -4336,6 +4388,7 @@ function renderRecipeSection(title, recipes) {
                                 <div class="recipe-header-content">
                                     <div class="list-title">${recipe.name}</div>
                                     <div class="list-meta">
+                                        ${recipe.shared ? `<span>🔗 Shared by ${recipe.shared_from} (${recipe.share_mode})</span>` : ''}
                                         <span>🍳 ${recipe.food_type || 'Uncategorized'}</span>
                                         ${recipe.difficulty ? `<span>📊 ${recipe.difficulty}</span>` : ''}
                                         ${recipe.servings ? `<span>👥 Serves ${recipe.servings}</span>` : ''}
@@ -4380,8 +4433,11 @@ function renderRecipeSection(title, recipes) {
                                 ` : ''}
                                 
                                 <div class="recipe-actions-bar">
-                                    <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); showEditRecipeModal('${recipe.id}')">✏️ Edit</button>
-                                    <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteRecipe('${recipe.id}')">🗑️ Delete</button>
+                                    ${recipe.shared ? '' : `
+                                        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); showEditRecipeModal('${recipe.id}')">✏️ Edit</button>
+                                        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteRecipe('${recipe.id}')">🗑️ Delete</button>
+                                        ${isFamilyAdmin() ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); showShareContentModal('recipe', '${recipe.id}', '${recipe.name.replace(/'/g, "\\'")}')">🔗 Share</button>` : ''}
+                                    `}
                                 </div>
                             </div>
                         </div>
@@ -5064,7 +5120,7 @@ function renderCalendar(container) {
                             const dateStr = formatEventDate(event.start_time, event.event_type);
                             const timeStr = formatEventTime(event.start_time, event.event_type);
                             const isAdmin = hasHouseholdControlAccess();
-                            const canEdit = isAdmin || event.created_by === store.user?.id || event.assigned_to === store.user?.id;
+                            const canEdit = !event.shared && (isAdmin || event.created_by === store.user?.id || event.assigned_to === store.user?.id);
                             return `
                                 <div class="list-item" style="flex-wrap:wrap;">
                                     <div class="user-badge" style="background:${color};"></div>
@@ -5074,6 +5130,7 @@ function renderCalendar(container) {
                                             <span>📅 ${dateStr}</span>
                                             <span>🕐 ${timeStr} CST</span>
                                             <span>🏷️ ${event.event_type || 'Event'}</span>
+                                            ${event.shared ? `<span>🔗 Shared by ${event.shared_from} (${event.share_mode})</span>` : ''}
                                             ${event.location ? `<span>📍 ${event.location}</span>` : ''}
                                             <span>👤 ${getUserName(event.assigned_to) || 'Whole Family'}</span>
                                         </div>
@@ -5119,7 +5176,7 @@ function showDayEvents(year, month, day) {
     }
     
     const isAdmin = hasHouseholdControlAccess();
-    const canEdit = (e) => isAdmin || e.created_by === store.user?.id || e.assigned_to === store.user?.id;
+    const canEdit = (e) => !e.shared && (isAdmin || e.created_by === store.user?.id || e.assigned_to === store.user?.id);
     
     showModal(`Events for ${dateStr}`, `
         <div class="list-container" style="margin-bottom:16px;">
@@ -5133,6 +5190,7 @@ function showDayEvents(year, month, day) {
                             <div class="list-meta">
                                 <span>🕐 ${timeStr} CST</span>
                                 <span>🏷️ ${e.event_type}</span>
+                                ${e.shared ? `<span>🔗 Shared by ${e.shared_from} (${e.share_mode})</span>` : ''}
                                 ${e.location ? `<span>📍 ${e.location}</span>` : ''}
                                 <span>👤 ${getUserName(e.assigned_to) || 'Whole Family'}</span>
                             </div>
@@ -5295,6 +5353,7 @@ function showEditEventModal(eventId) {
         <div style="display:flex;gap:8px;">
             <button class="btn btn-primary w-full" onclick="submitEditEvent('${eventId}')">Save Changes</button>
             <button class="btn btn-danger" onclick="deleteEvent('${eventId}')">🗑️ Delete</button>
+            ${isFamilyAdmin() ? `<button class="btn btn-ghost" onclick="showShareContentModal('calendar_event', '${eventId}', '${event.title.replace(/'/g, "\\'")}')">🔗 Share</button>` : ''}
         </div>
     `);
 }
@@ -5813,6 +5872,99 @@ async function submitStoreItem() {
     if (success) closeModal();
 }
 
+function showShareContentModal(resourceType, resourceId, resourceName) {
+    if (!isFamilyAdmin()) {
+        alert('Only family admins can share content.');
+        return;
+    }
+
+    const labels = {
+        recipe: 'Recipe',
+        chore: 'Chore Idea',
+        calendar_event: 'Calendar Event'
+    };
+    showModal(`Share ${labels[resourceType] || 'Content'}`, `
+        <div class="form-group">
+            <label class="form-label">Sharing</label>
+            <input class="form-input" value="${resourceName}" disabled>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Recipient Family Code</label>
+            <input class="form-input" id="shareFamilyCode" maxlength="32" autocapitalize="characters" placeholder="Enter their family code">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Share Mode</label>
+            <select class="form-select" id="shareMode">
+                <option value="live">Live: recipients see future updates</option>
+                <option value="snapshot">Snapshot: preserve this version</option>
+            </select>
+        </div>
+        <button class="btn btn-primary w-full" onclick="submitShareContent('${resourceType}', '${resourceId}')">Share</button>
+    `);
+}
+
+async function submitShareContent(resourceType, resourceId) {
+    if (!isFamilyAdmin()) return;
+
+    const familyCode = document.getElementById('shareFamilyCode').value.trim().toUpperCase();
+    const shareMode = document.getElementById('shareMode').value;
+    if (!familyCode) {
+        alert('Enter the recipient family code.');
+        return;
+    }
+
+    const { error } = await supabaseClient.rpc('share_family_content', {
+        p_resource_type: resourceType,
+        p_resource_id: resourceId,
+        p_target_family_code: familyCode,
+        p_share_mode: shareMode
+    });
+
+    if (error) {
+        alert(`Unable to share: ${error.message}`);
+        return;
+    }
+
+    closeModal();
+    alert('Content shared.');
+}
+
+async function showOutgoingFamilyShares() {
+    if (!isFamilyAdmin()) return;
+
+    const { data, error } = await supabaseClient.rpc('get_outgoing_family_shares');
+    if (error) {
+        alert(`Unable to load shares: ${error.message}`);
+        return;
+    }
+
+    showModal('Shared With Other Families', `
+        <div class="list-container">
+            ${(data || []).map((share) => `
+                <div class="list-item">
+                    <div class="list-content">
+                        <div class="list-title">${share.resource_type.replace('_', ' ')}</div>
+                        <div class="list-meta"><span>${share.target_family_name}</span><span>${share.share_mode}</span></div>
+                    </div>
+                    <button class="btn btn-danger btn-sm" onclick="revokeFamilyShare('${share.share_id}')">Revoke</button>
+                </div>
+            `).join('') || '<div class="empty-state-small">Nothing is currently shared.</div>'}
+        </div>
+    `);
+}
+
+async function revokeFamilyShare(shareId) {
+    if (!isFamilyAdmin()) return;
+    if (!confirm('Stop sharing this item?')) return;
+
+    const { error } = await supabaseClient.rpc('revoke_family_share', { p_share_id: shareId });
+    if (error) {
+        alert(`Unable to revoke share: ${error.message}`);
+        return;
+    }
+    await showOutgoingFamilyShares();
+}
+
 function renderAdmin(container) {
     const role = (store.user?.role || '').toLowerCase();
     const isAdmin = role === 'admin';
@@ -5921,6 +6073,16 @@ function renderAdmin(container) {
                     </div>
                 </div>
                 ${isAdmin ? `<button class="btn btn-primary w-full" onclick="updateFamily()">Update Family</button>` : ''}
+            </div>
+        `;
+    }
+
+    if (isAdmin) {
+        html += `
+            <div class="card" style="${getCardBackgroundStyle('admin_family')}">
+                <div class="card-header"><div class="card-title">🔗 Family Sharing</div></div>
+                <div style="color:var(--text-muted);font-size:0.875rem;margin-bottom:16px;">Share individual recipes, chore ideas, and calendar events with another family. Choose live updates or a saved snapshot.</div>
+                <button class="btn btn-primary w-full" onclick="showOutgoingFamilyShares()">Manage Shared Items</button>
             </div>
         `;
     }
