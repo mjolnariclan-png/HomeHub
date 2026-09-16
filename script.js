@@ -5072,18 +5072,21 @@ function formatEventTime(startTime, eventType) {
     });
 }
 
+function getVisibleCalendarEvents() {
+    if (!isChildAccount()) return store.calendarEvents;
+
+    const userId = store.user?.id;
+    return store.calendarEvents.filter((event) => {
+        const assignedId = event.assigned_to?.id || event.assigned_to;
+        return assignedId === userId || assignedId === null || assignedId === undefined;
+    });
+}
+
 function renderCalendar(container) {
     const year = calendarCurrentDate.getFullYear();
     const month = calendarCurrentDate.getMonth();
     
-    let visibleEvents = store.calendarEvents;
-    if (isChildAccount()) {
-        const myId = store.user?.id;
-        visibleEvents = store.calendarEvents.filter(e => {
-            const assignedId = e.assigned_to?.id || e.assigned_to;
-            return assignedId === myId || assignedId === null || assignedId === undefined;
-        });
-    }
+    const visibleEvents = getVisibleCalendarEvents();
 
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
@@ -5230,7 +5233,7 @@ function changeCalendarMonth(delta) {
 function showDayEvents(year, month, day) {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     
-    const dayEvents = visibleEvents.filter(e => {
+    const dayEvents = getVisibleCalendarEvents().filter(e => {
         const isoMatch = e.start_time.match(/^(\d{4})-(\d{2})-(\d{2})/);
         if (isoMatch) {
             return parseInt(isoMatch[1]) === year && 
