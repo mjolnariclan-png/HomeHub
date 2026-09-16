@@ -3,6 +3,9 @@
 
 create extension if not exists pgcrypto;
 
+drop function if exists public.signup_create_family(uuid, text, text);
+drop function if exists public.signup_join_family(uuid, text, text);
+
 create or replace function public.signup_create_family(
   p_user_id uuid,
   p_email text,
