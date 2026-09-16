@@ -5087,6 +5087,27 @@ function formatEventTime(startTime, eventType) {
     });
 }
 
+function toChicagoUtc(dateTimeLocal) {
+    if (!dateTimeLocal) return null;
+
+    const [datePart, timePart] = dateTimeLocal.split('T');
+    const [year, month, day] = datePart.split('-').map(Number);
+    const [hour, minute] = timePart.split(':').map(Number);
+    const utcGuess = Date.UTC(year, month - 1, day, hour, minute);
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Chicago',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23'
+    }).formatToParts(new Date(utcGuess));
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const displayedAsUtc = Date.UTC(values.year, Number(values.month) - 1, values.day, values.hour, values.minute);
+    return new Date(utcGuess + (utcGuess - displayedAsUtc)).toISOString();
+}
+
 function getVisibleCalendarEvents() {
     if (!isChildAccount()) return store.calendarEvents;
 
@@ -5460,17 +5481,8 @@ async function submitEditEvent(eventId) {
     
     if (!title || !startTime) { alert('Title and start time are required'); return; }
     
-    const toUTCString = (dtLocal) => {
-        if (!dtLocal) return null;
-        const [datePart, timePart] = dtLocal.split('T');
-        const [year, month, day] = datePart.split('-').map(Number);
-        const [hour, minute] = timePart.split(':').map(Number);
-        const cstDate = new Date(Date.UTC(year, month - 1, day, hour + 5, minute));
-        return cstDate.toISOString();
-    };
-    
-    const isoStart = toUTCString(startTime);
-    const isoEnd = toUTCString(endTime);
+    const isoStart = toChicagoUtc(startTime);
+    const isoEnd = toChicagoUtc(endTime);
     
     const { error } = await supabaseClient
         .from('calendar_events')
@@ -5521,24 +5533,8 @@ async function submitEvent() {
     
     if (!title || !startTime) { alert('Title and start time are required'); return; }
     
-    // Convert datetime-local (no timezone) to proper ISO 8601 with UTC timezone
-    // datetime-local format: "2026-06-18T09:00"
-    // We need: "2026-06-18T09:00:00Z" for Supabase timestamptz
-        const toUTCString = (dtLocal) => {
-        if (!dtLocal) return null;
-        // dtLocal is "2026-05-01T14:30" (CST local time, no timezone)
-        // Parse as CST, then convert to UTC ISO string
-        const [datePart, timePart] = dtLocal.split('T');
-        const [year, month, day] = datePart.split('-').map(Number);
-        const [hour, minute] = timePart.split(':').map(Number);
-        // Create date in CST (UTC-5 standard, UTC-6 DST)
-        // Use America/Chicago timezone
-        const cstDate = new Date(Date.UTC(year, month - 1, day, hour + 5, minute));
-        return cstDate.toISOString();
-    };
-    
-    const isoStart = toUTCString(startTime);
-    const isoEnd = toUTCString(endTime);
+    const isoStart = toChicagoUtc(startTime);
+    const isoEnd = toChicagoUtc(endTime);
     
     const event = await addCalendarEvent(title, description, isoStart, isoEnd, eventType, location || null, assignedTo || null, recurrence || 'none');
     if (event) {
