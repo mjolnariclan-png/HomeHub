@@ -20,7 +20,7 @@
     --viking-sidebar-image: url('assets/viking-sidebar.png');
     --viking-main-image: url('assets/viking-main.png');
     --active-main-bg: var(--viking-main-image);
-    --active-main-bg-size: 100% 100%;
+    --active-main-bg-size: cover;
 
     --sidebar-width: 260px;
     --header-height: 64px;
@@ -110,6 +110,7 @@ body::after {
     background-repeat: no-repeat;
     background-size: var(--active-main-bg-size);
     z-index: 0;
+    opacity: 0.6;
 }
 
 
@@ -1739,6 +1740,7 @@ body::before {
 @media (max-width: 768px) {
     :root {
         --sidebar-width: 0px;
+        --active-main-bg-size: cover;
     }
 
     .app-container {
@@ -1748,6 +1750,10 @@ body::before {
         min-height: 100vh;
         min-height: 100dvh;
         overflow-x: hidden;
+    }
+
+    body::after {
+        opacity: 0.4;
     }
 
     /* Sidebar: completely hidden by default, slide-in overlay when open */
@@ -1798,10 +1804,11 @@ body::before {
     .top-header {
         min-height: 64px;
         height: auto;
-        padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
-        gap: 10px;
-        flex-wrap: nowrap;
+        padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+        gap: 8px;
+        flex-wrap: wrap;
         align-items: center;
+        justify-content: space-between;
         flex-shrink: 0;
     }
 
@@ -1826,6 +1833,7 @@ body::before {
         overflow: hidden;
         text-overflow: ellipsis;
         max-width: 50vw;
+        flex: 1;
     }
 
     .header-actions {
@@ -1833,16 +1841,18 @@ body::before {
         gap: 6px;
         align-items: center;
         flex-shrink: 0;
+        flex-wrap: wrap;
     }
 
     .header-actions .btn {
-        padding: 7px 10px;
-        font-size: 0.75rem;
+        padding: 6px 8px;
+        font-size: 0.7rem;
+        white-space: nowrap;
     }
 
     .content-area {
         min-height: 0;
-        padding: 12px 10px 20px;
+        padding: 8px 6px 16px;
         overflow-x: hidden;
     }
 
@@ -1851,12 +1861,23 @@ body::before {
     .store-grid,
     .admin-grid {
         grid-template-columns: 1fr !important;
-        gap: 12px;
+        gap: 6px;
     }
 
     .card {
-        padding: 14px;
-        border-radius: 10px;
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 6px;
+    }
+
+    .dashboard-grid .card,
+    .store-grid .card,
+    .admin-grid .card {
+        margin-bottom: 0;
+    }
+
+    .dashboard-grid .card {
+        margin-bottom: 0;
     }
 
     .stat-value {
