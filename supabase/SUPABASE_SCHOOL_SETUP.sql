@@ -56,6 +56,10 @@ drop policy if exists "grades_manage_adults" on public.school_grades;
 
 create policy "students_read_family" on public.students for select to authenticated using (
   family_id in (select family_id from public.profiles where id = auth.uid())
+  and (
+    profile_id = auth.uid()
+    or exists (select 1 from public.profiles where id = auth.uid() and role in ('admin', 'parent', 'adult'))
+  )
 );
 create policy "students_manage_adults" on public.students for all to authenticated using (
   family_id in (select family_id from public.profiles where id = auth.uid() and role in ('admin', 'parent', 'adult'))
@@ -63,7 +67,11 @@ create policy "students_manage_adults" on public.students for all to authenticat
   family_id in (select family_id from public.profiles where id = auth.uid() and role in ('admin', 'parent', 'adult'))
 );
 create policy "subjects_read_family" on public.school_subjects for select to authenticated using (
-  student_id in (select id from public.students where family_id in (select family_id from public.profiles where id = auth.uid()))
+  student_id in (
+    select id from public.students
+    where family_id in (select family_id from public.profiles where id = auth.uid())
+      and (profile_id = auth.uid() or exists (select 1 from public.profiles where id = auth.uid() and role in ('admin', 'parent', 'adult')))
+  )
 );
 create policy "subjects_manage_adults" on public.school_subjects for all to authenticated using (
   student_id in (select id from public.students where family_id in (select family_id from public.profiles where id = auth.uid() and role in ('admin', 'parent', 'adult')))
@@ -71,7 +79,11 @@ create policy "subjects_manage_adults" on public.school_subjects for all to auth
   student_id in (select id from public.students where family_id in (select family_id from public.profiles where id = auth.uid() and role in ('admin', 'parent', 'adult')))
 );
 create policy "grades_read_family" on public.school_grades for select to authenticated using (
-  student_id in (select id from public.students where family_id in (select family_id from public.profiles where id = auth.uid()))
+  student_id in (
+    select id from public.students
+    where family_id in (select family_id from public.profiles where id = auth.uid())
+      and (profile_id = auth.uid() or exists (select 1 from public.profiles where id = auth.uid() and role in ('admin', 'parent', 'adult')))
+  )
 );
 create policy "grades_manage_adults" on public.school_grades for all to authenticated using (
   student_id in (select id from public.students where family_id in (select family_id from public.profiles where id = auth.uid() and role in ('admin', 'parent', 'adult')))

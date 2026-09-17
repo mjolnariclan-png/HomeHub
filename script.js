@@ -37,6 +37,9 @@ const store = {
     leaderboard: [],
     budgetEntries: [],
     budgetAccounts: [],
+    students: [],
+    schoolSubjects: [],
+    schoolGrades: [],
     transactions: [],
     notifications: [],
     badges: [],
@@ -229,7 +232,7 @@ function isChildAccount(user = store.user) {
 
 function canAccessPage(page, user = store.user) {
     if (!isChildAccount(user)) return true;
-    const childAllowedPages = new Set(['todo', 'chores', 'store', 'admin', 'calendar', 'leaderboard']);
+    const childAllowedPages = new Set(['todo', 'chores', 'store', 'admin', 'calendar', 'school', 'leaderboard']);
     return childAllowedPages.has(page);
 }
 
@@ -1250,6 +1253,7 @@ function renderPage(page) {
         case 'recipes': renderRecipes(container); break;
         case 'store': renderStore(container); break;
         case 'calendar': renderCalendar(container); break;
+        case 'school': renderSchool(container); break;
         case 'leaderboard': renderLeaderboard(container); break;
         case 'budget': renderBudget(container); break;
         case 'admin': renderAdmin(container); break;
@@ -1600,6 +1604,7 @@ async function loadFamilyData() {
         loadRecipes(),
         loadCalendarEvents(),
         loadBudget(),
+        loadSchoolData(),
         loadLeaderboard(),
         loadStoreItems(),
         loadSharedIngredients()
@@ -1965,6 +1970,36 @@ async function loadCalendarEvents() {
     
     if (error) { console.error('Error loading calendar:', error); return; }
     store.calendarEvents = [...(data || []), ...await loadSharedContent('calendar_event')];
+}
+
+async function loadSchoolData() {
+    const { data: students, error } = await supabaseClient
+        .from('students')
+        .select('*')
+        .eq('family_id', store.user.family_id)
+        .order('student_name');
+    if (error) {
+        console.warn('School data unavailable:', error.message);
+        store.students = [];
+        store.schoolSubjects = [];
+        store.schoolGrades = [];
+        return;
+    }
+
+    store.students = students || [];
+    if (store.students.length === 0) {
+        store.schoolSubjects = [];
+        store.schoolGrades = [];
+        return;
+    }
+
+    const studentIds = store.students.map((student) => student.id);
+    const [{ data: subjects }, { data: grades }] = await Promise.all([
+        supabaseClient.from('school_subjects').select('*').in('student_id', studentIds).order('name'),
+        supabaseClient.from('school_grades').select('*').in('student_id', studentIds).order('graded_on', { ascending: false })
+    ]);
+    store.schoolSubjects = subjects || [];
+    store.schoolGrades = grades || [];
 }
 
 async function loadBudgetAccounts() {
@@ -5541,6 +5576,69 @@ async function submitEvent() {
         await shareNewContent('calendar_event', event.id, shareRecipients, getCreateShareMode('calendarEvent'));
         closeModal();
     }
+}
+
+function renderSchool(container) {
+    const canManage = hasHouseholdControlAccess();
+    const students = isChildAccount()
+        ? store.students.filter((student) => student.profile_id === store.user?.id)
+        : store.students;
+
+    container.innerHTML = `
+        <div class="fade-in">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:12px;">
+                <div><div style="font-size:1.25rem;font-weight:700;">🎓 School</div><div style="color:var(--text-muted);font-size:0.875rem;">Students, subjects, and grades</div></div>
+                ${canManage ? '<button class="btn btn-primary" onclick="showAddStudentModal()">+ Add Student</button>' : ''}
+            </div>
+            ${students.map((student) => {
+                const grades = store.schoolGrades.filter((grade) => grade.student_id === student.id);
+                const subjects = store.schoolSubjects.filter((subject) => subject.student_id === student.id);
+                const graded = grades.filter((grade) => grade.score !== null && grade.max_score);
+                const average = graded.length ? graded.reduce((sum, grade) => sum + (Number(grade.score) / Number(grade.max_score) * 100), 0) / graded.length : null;
+                return `
+                    <div class="card" style="margin-bottom:16px;">
+                        <div class="card-header"><div><div class="card-title">${student.student_name}</div><div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">${[student.school_name, student.grade_level, student.school_year, student.teacher_name].filter(Boolean).join(' · ') || 'Student profile'}</div></div>${canManage ? `<button class="btn btn-ghost btn-sm" onclick="showAddGradeModal('${student.id}')">+ Grade</button>` : ''}</div>
+                        <div class="list-meta" style="margin-bottom:12px;"><span>${subjects.length} subjects</span>${average !== null ? `<span>Average: ${average.toFixed(1)}%</span>` : ''}</div>
+                        <div class="list-container">${grades.slice(0, 8).map((grade) => {
+                            const subject = subjects.find((item) => item.id === grade.subject_id)?.name || 'General';
+                            const percentage = grade.score !== null && grade.max_score ? `${(Number(grade.score) / Number(grade.max_score) * 100).toFixed(1)}%` : grade.letter_grade || 'Recorded';
+                            return `<div class="list-item"><div class="list-content"><div class="list-title">${grade.title}</div><div class="list-meta"><span>${subject}</span><span>${grade.entry_type}</span><span>${percentage}</span><span>${grade.graded_on}</span></div>${grade.notes ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">${grade.notes}</div>` : ''}</div></div>`;
+                        }).join('') || '<div class="empty-state-small">No grades recorded.</div>'}</div>
+                    </div>`;
+            }).join('') || '<div class="card"><div class="empty-state-small">No student profiles yet.</div></div>'}
+        </div>`;
+}
+
+function showAddStudentModal() {
+    if (!hasHouseholdControlAccess()) return;
+    showModal('Add Student', `<div class="form-group"><label class="form-label">Student Name *</label><input class="form-input" id="studentName"></div><div class="form-row"><div class="form-group"><label class="form-label">School</label><input class="form-input" id="studentSchool"></div><div class="form-group"><label class="form-label">Grade / Year</label><input class="form-input" id="studentGradeLevel"></div></div><div class="form-row"><div class="form-group"><label class="form-label">School Year</label><input class="form-input" id="studentSchoolYear" placeholder="2026-2027"></div><div class="form-group"><label class="form-label">Teacher</label><input class="form-input" id="studentTeacher"></div></div><button class="btn btn-primary w-full" onclick="submitStudent()">Save Student</button>`);
+}
+
+async function submitStudent() {
+    const studentName = document.getElementById('studentName').value.trim();
+    if (!studentName) return alert('Student name is required.');
+    const { error } = await supabaseClient.from('students').insert({ family_id: store.user.family_id, student_name: studentName, school_name: document.getElementById('studentSchool').value.trim() || null, grade_level: document.getElementById('studentGradeLevel').value.trim() || null, school_year: document.getElementById('studentSchoolYear').value.trim() || null, teacher_name: document.getElementById('studentTeacher').value.trim() || null });
+    if (error) return alert(`Unable to save student: ${error.message}`);
+    await loadSchoolData(); closeModal(); renderPage('school');
+}
+
+function showAddGradeModal(studentId) {
+    if (!hasHouseholdControlAccess()) return;
+    showModal('Add Grade', `<div class="form-group"><label class="form-label">Subject *</label><input class="form-input" id="gradeSubject" placeholder="Math"></div><div class="form-group"><label class="form-label">Assignment *</label><input class="form-input" id="gradeTitle"></div><div class="form-row"><div class="form-group"><label class="form-label">Score</label><input type="number" class="form-input" id="gradeScore" min="0" step="0.01"></div><div class="form-group"><label class="form-label">Out Of</label><input type="number" class="form-input" id="gradeMaxScore" min="0.01" step="0.01"></div></div><div class="form-group"><label class="form-label">Type</label><select class="form-select" id="gradeEntryType"><option>Assignment</option><option>Quiz</option><option>Test</option><option>Project</option><option>Homework</option><option>Exam</option><option>Report Card</option></select></div><button class="btn btn-primary w-full" onclick="submitGrade('${studentId}')">Save Grade</button>`);
+}
+
+async function submitGrade(studentId) {
+    const subjectName = document.getElementById('gradeSubject').value.trim();
+    const title = document.getElementById('gradeTitle').value.trim();
+    const score = document.getElementById('gradeScore').value;
+    const maxScore = document.getElementById('gradeMaxScore').value;
+    if (!subjectName || !title) return alert('Subject and assignment are required.');
+    if ((score && !maxScore) || (!score && maxScore) || (score && Number(score) > Number(maxScore))) return alert('Enter a valid score and maximum score.');
+    const { data: subject, error: subjectError } = await supabaseClient.from('school_subjects').upsert({ student_id: studentId, name: subjectName }, { onConflict: 'student_id,name' }).select().single();
+    if (subjectError) return alert(`Unable to save subject: ${subjectError.message}`);
+    const { error } = await supabaseClient.from('school_grades').insert({ student_id: studentId, subject_id: subject.id, title, entry_type: document.getElementById('gradeEntryType').value, score: score || null, max_score: maxScore || null, created_by: store.user.id });
+    if (error) return alert(`Unable to save grade: ${error.message}`);
+    await loadSchoolData(); closeModal(); renderPage('school');
 }
 
 
