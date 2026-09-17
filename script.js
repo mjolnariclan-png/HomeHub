@@ -5682,22 +5682,150 @@ async function saveSchoolMode(studentId) {
     await loadSchoolData(); closeModal(); renderPage('school');
 }
 
+const MESSAGE_DB_NAME = 'homehub-private-messages';
+const MESSAGE_STORE = 'messages';
+const KEY_STORE = 'keys';
+let messageChannel = null;
+
+function openMessageDb() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(MESSAGE_DB_NAME, 1);
+        request.onupgradeneeded = () => {
+            request.result.createObjectStore(KEY_STORE);
+            request.result.createObjectStore(MESSAGE_STORE, { keyPath: 'id' });
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+async function messageDbGet(storeName, key) {
+    const db = await openMessageDb();
+    return new Promise((resolve, reject) => {
+        const request = db.transaction(storeName).objectStore(storeName).get(key);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+async function messageDbPut(storeName, value, key) {
+    const db = await openMessageDb();
+    return new Promise((resolve, reject) => {
+        const request = db.transaction(storeName, 'readwrite').objectStore(storeName).put(value, key);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
+}
+
+function base64FromBytes(bytes) {
+    return btoa(String.fromCharCode(...new Uint8Array(bytes)));
+}
+
+function bytesFromBase64(value) {
+    return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+}
+
+async function getMessagingIdentity() {
+    let identity = await messageDbGet(KEY_STORE, 'identity');
+    if (identity) return identity;
+
+    const keyPair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']);
+    const historyKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    identity = { deviceId: crypto.randomUUID(), privateKey: keyPair.privateKey, publicKey: keyPair.publicKey, historyKey };
+    await messageDbPut(KEY_STORE, identity, 'identity');
+    return identity;
+}
+
+async function saveLocalMessage(message) {
+    const identity = await getMessagingIdentity();
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, identity.historyKey, new TextEncoder().encode(message.text));
+    await messageDbPut(MESSAGE_STORE, { ...message, text: undefined, ciphertext: base64FromBytes(ciphertext), iv: base64FromBytes(iv) });
+}
+
+async function loadLocalMessages() {
+    const identity = await getMessagingIdentity();
+    const db = await openMessageDb();
+    const records = await new Promise((resolve, reject) => {
+        const request = db.transaction(MESSAGE_STORE).objectStore(MESSAGE_STORE).getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+    return Promise.all(records.sort((a, b) => a.sentAt.localeCompare(b.sentAt)).map(async (record) => ({
+        ...record,
+        text: new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytesFromBase64(record.iv) }, identity.historyKey, bytesFromBase64(record.ciphertext)))
+    })));
+}
+
+async function registerMessagingDevice() {
+    const identity = await getMessagingIdentity();
+    const publicKeyJwk = await crypto.subtle.exportKey('jwk', identity.publicKey);
+    const { error } = await supabaseClient.from('message_devices').upsert({
+        profile_id: store.user.id,
+        device_id: identity.deviceId,
+        public_key_jwk: publicKeyJwk,
+        last_seen_at: new Date().toISOString()
+    }, { onConflict: 'profile_id,device_id' });
+    if (error) throw error;
+    return identity;
+}
+
 async function renderMessages(container) {
     container.innerHTML = '<div class="fade-in"><div class="card"><div class="card-title">💬 Messages</div><div style="color:var(--text-muted);margin-top:12px;">Checking private messaging setup...</div></div></div>';
-
     const { error } = await supabaseClient.from('message_devices').select('id').limit(1);
     store.messagingTransportReady = !error;
     if (store.currentPage !== 'messages') return;
+    const messages = store.messagingTransportReady ? await loadLocalMessages() : [];
+    container.innerHTML = `<div class="fade-in"><div class="card"><div class="card-header"><div class="card-title">💬 Family Messages</div>${store.messagingTransportReady ? '<button class="btn btn-ghost btn-sm" onclick="initializeMessaging()">Connect Device</button>' : ''}</div>${store.messagingTransportReady ? `<div class="list-container" style="margin-bottom:16px;">${messages.map((message) => `<div class="list-item"><div class="list-content"><div class="list-title">${message.senderName}</div><div>${message.text}</div><div class="list-meta"><span>${new Date(message.sentAt).toLocaleString()}</span></div></div></div>`).join('') || '<div class="empty-state-small">No messages stored on this device.</div>'}</div><div style="display:flex;gap:8px;"><input class="form-input" id="messageText" placeholder="Message your family"><button class="btn btn-primary" onclick="sendFamilyMessage()">Send</button></div>` : '<div style="color:var(--text-muted);">Run SUPABASE_MESSAGING_TRANSPORT.sql in Supabase, then refresh.</div>'}</div></div>`;
+}
 
-    container.innerHTML = `
-        <div class="fade-in">
-            <div class="card">
-                <div class="card-header"><div class="card-title">💬 Private Messages</div></div>
-                ${store.messagingTransportReady
-                    ? '<div style="color:var(--text-muted);">The device-key backend is ready. Private conversation delivery still requires Supabase Realtime Broadcast authorization before message sending can be enabled.</div>'
-                    : '<div style="color:var(--text-muted);">Private messaging is not configured yet. Run the messaging transport SQL script in Supabase, then refresh this page.</div>'}
-            </div>
-        </div>`;
+async function initializeMessaging() {
+    try {
+        const identity = await registerMessagingDevice();
+        if (messageChannel) return;
+        messageChannel = supabaseClient.channel(`family:${store.user.family_id}:messages`, { config: { private: true } });
+        messageChannel.on('broadcast', { event: 'encrypted-message' }, async ({ payload }) => {
+            if (payload.recipientDeviceId !== identity.deviceId) return;
+            try {
+                const ephemeralKey = await crypto.subtle.importKey('jwk', payload.senderEphemeralPublicKey, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+                const key = await crypto.subtle.deriveKey({ name: 'ECDH', public: ephemeralKey }, identity.privateKey, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+                const text = new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytesFromBase64(payload.iv) }, key, bytesFromBase64(payload.ciphertext)));
+                await saveLocalMessage({ id: payload.messageId, senderName: payload.senderName, sentAt: payload.sentAt, text });
+                if (store.currentPage === 'messages') renderMessages(document.getElementById('contentArea'));
+            } catch (receiveError) {
+                console.error('Encrypted message could not be decrypted:', receiveError);
+            }
+        }).subscribe((status) => {
+            if (status === 'CHANNEL_ERROR') alert('Private message transport was rejected. Complete Realtime Authorization in Supabase.');
+        });
+        alert('This device is ready for private family messages.');
+    } catch (error) {
+        alert(`Unable to connect this device: ${error.message}`);
+    }
+}
+
+async function sendFamilyMessage() {
+    const input = document.getElementById('messageText');
+    const text = input?.value.trim();
+    if (!text) return;
+    if (!messageChannel) return alert('Connect this device before sending a message.');
+
+    const { data: devices, error } = await supabaseClient.from('message_devices').select('device_id, public_key_jwk').is('revoked_at', null);
+    if (error) return alert(`Unable to find family devices: ${error.message}`);
+    const identity = await getMessagingIdentity();
+    const message = { id: crypto.randomUUID(), senderName: store.user.display_name || store.user.username || 'Family member', sentAt: new Date().toISOString(), text };
+    const recipients = (devices || []).filter((device) => device.device_id !== identity.deviceId);
+    await Promise.all(recipients.map(async (device) => {
+        const publicKey = await crypto.subtle.importKey('jwk', device.public_key_jwk, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+        const ephemeral = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']);
+        const key = await crypto.subtle.deriveKey({ name: 'ECDH', public: publicKey }, ephemeral.privateKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(text));
+        await messageChannel.send({ type: 'broadcast', event: 'encrypted-message', payload: { messageId: message.id, recipientDeviceId: device.device_id, senderName: message.senderName, sentAt: message.sentAt, senderEphemeralPublicKey: await crypto.subtle.exportKey('jwk', ephemeral.publicKey), iv: base64FromBytes(iv), ciphertext: base64FromBytes(ciphertext) } });
+    }));
+    await saveLocalMessage(message);
+    input.value = '';
+    renderMessages(document.getElementById('contentArea'));
 }
 
 
