@@ -40,6 +40,7 @@ const store = {
     students: [],
     schoolSubjects: [],
     schoolGrades: [],
+    schoolModeSchedules: [],
     transactions: [],
     notifications: [],
     badges: [],
@@ -230,7 +231,25 @@ function isChildAccount(user = store.user) {
     return role === 'user' || role === 'child';
 }
 
+function isSchoolModeActive() {
+    if (!isChildAccount()) return false;
+    const student = store.students.find((item) => item.profile_id === store.user?.id);
+    const schedule = store.schoolModeSchedules.find((item) => item.student_id === student?.id && item.is_enabled);
+    if (!schedule) return false;
+    const now = new Date();
+    const day = now.getDay();
+    if (!schedule.active_days?.includes(day)) return false;
+    const time = now.toLocaleTimeString('en-GB', { timeZone: schedule.time_zone || 'America/Chicago', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    const startTime = schedule.start_time.slice(0, 5);
+    const endTime = schedule.end_time.slice(0, 5);
+    const crossesMidnight = endTime < startTime;
+    return crossesMidnight
+        ? time >= startTime || time < endTime
+        : time >= startTime && time < endTime;
+}
+
 function canAccessPage(page, user = store.user) {
+    if (isChildAccount(user) && isSchoolModeActive()) return ['school', 'calendar'].includes(page);
     if (!isChildAccount(user)) return true;
     const childAllowedPages = new Set(['todo', 'chores', 'store', 'admin', 'calendar', 'school', 'leaderboard']);
     return childAllowedPages.has(page);
@@ -2000,6 +2019,8 @@ async function loadSchoolData() {
     ]);
     store.schoolSubjects = subjects || [];
     store.schoolGrades = grades || [];
+    const { data: schedules } = await supabaseClient.from('school_mode_schedules').select('*').in('student_id', studentIds);
+    store.schoolModeSchedules = schedules || [];
 }
 
 async function loadBudgetAccounts() {
@@ -5597,7 +5618,7 @@ function renderSchool(container) {
                 const average = graded.length ? graded.reduce((sum, grade) => sum + (Number(grade.score) / Number(grade.max_score) * 100), 0) / graded.length : null;
                 return `
                     <div class="card" style="margin-bottom:16px;">
-                        <div class="card-header"><div><div class="card-title">${student.student_name}</div><div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">${[student.school_name, student.grade_level, student.school_year, student.teacher_name].filter(Boolean).join(' · ') || 'Student profile'}</div></div>${canManage ? `<button class="btn btn-ghost btn-sm" onclick="showAddGradeModal('${student.id}')">+ Grade</button>` : ''}</div>
+                        <div class="card-header"><div><div class="card-title">${student.student_name}</div><div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">${[student.school_name, student.grade_level, student.school_year, student.teacher_name].filter(Boolean).join(' · ') || 'Student profile'}</div></div>${canManage ? `<div style="display:flex;gap:6px;"><button class="btn btn-ghost btn-sm" onclick="showSchoolModeModal('${student.id}')">School Mode</button><button class="btn btn-ghost btn-sm" onclick="showAddGradeModal('${student.id}')">+ Grade</button></div>` : ''}</div>
                         <div class="list-meta" style="margin-bottom:12px;"><span>${subjects.length} subjects</span>${average !== null ? `<span>Average: ${average.toFixed(1)}%</span>` : ''}</div>
                         <div class="list-container">${grades.slice(0, 8).map((grade) => {
                             const subject = subjects.find((item) => item.id === grade.subject_id)?.name || 'General';
@@ -5638,6 +5659,24 @@ async function submitGrade(studentId) {
     if (subjectError) return alert(`Unable to save subject: ${subjectError.message}`);
     const { error } = await supabaseClient.from('school_grades').insert({ student_id: studentId, subject_id: subject.id, title, entry_type: document.getElementById('gradeEntryType').value, score: score || null, max_score: maxScore || null, created_by: store.user.id });
     if (error) return alert(`Unable to save grade: ${error.message}`);
+    await loadSchoolData(); closeModal(); renderPage('school');
+}
+
+function showSchoolModeModal(studentId) {
+    if (!hasHouseholdControlAccess()) return;
+    const schedule = store.schoolModeSchedules.find((item) => item.student_id === studentId);
+    const activeDays = schedule?.active_days || [1, 2, 3, 4, 5];
+    showModal('School Mode', `<div class="form-row"><div class="form-group"><label class="form-label">Start</label><input type="time" class="form-input" id="schoolModeStart" value="${schedule?.start_time?.slice(0, 5) || '08:00'}"></div><div class="form-group"><label class="form-label">End</label><input type="time" class="form-input" id="schoolModeEnd" value="${schedule?.end_time?.slice(0, 5) || '15:00'}"></div></div><div class="form-group"><label class="form-label">School Days</label><div style="display:flex;flex-wrap:wrap;gap:8px;">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((day, index) => `<label><input type="checkbox" name="schoolModeDay" value="${index}" ${activeDays.includes(index) ? 'checked' : ''}> ${day}</label>`).join('')}</div></div><label style="display:flex;gap:8px;margin-bottom:16px;"><input type="checkbox" id="schoolModeEnabled" ${schedule?.is_enabled !== false ? 'checked' : ''}> Enable School Mode</label><button class="btn btn-primary w-full" onclick="saveSchoolMode('${studentId}')">Save Schedule</button>`);
+}
+
+async function saveSchoolMode(studentId) {
+    const activeDays = Array.from(document.querySelectorAll('input[name="schoolModeDay"]:checked')).map((input) => Number(input.value));
+    if (!activeDays.length) return alert('Choose at least one school day.');
+    const startTime = document.getElementById('schoolModeStart').value;
+    const endTime = document.getElementById('schoolModeEnd').value;
+    if (!startTime || !endTime) return alert('Enter a start and end time.');
+    const { error } = await supabaseClient.from('school_mode_schedules').upsert({ student_id: studentId, start_time: startTime, end_time: endTime, active_days: activeDays, is_enabled: document.getElementById('schoolModeEnabled').checked }, { onConflict: 'student_id' });
+    if (error) return alert(`Unable to save School Mode: ${error.message}`);
     await loadSchoolData(); closeModal(); renderPage('school');
 }
 
