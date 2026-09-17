@@ -40,7 +40,7 @@ Browser private keys can be non-extractable, but device storage is not a substit
 
 1. Run `SUPABASE_MESSAGING_TRANSPORT.sql` in Supabase SQL Editor.
 2. In Supabase Dashboard, enable Realtime Broadcast and Presence.
-3. Configure Realtime Authorization so only authenticated users whose `profiles.family_id` matches the channel family UUID can subscribe and broadcast to that private channel.
+3. The script adds Realtime Authorization policies for `family:<family-id>:messages`. In Realtime Settings, confirm authorization is enabled for private channels.
 4. Do not create a `messages` table, a message-body column, or a database trigger that logs message content.
 5. Confirm in Database Tables that only `message_devices` exists for this feature.
 6. Inspect Realtime/network payloads during testing and confirm only encrypted payloads are transmitted.

@@ -44,11 +44,35 @@ using (
       and me.family_id = owner.family_id
   )
 );
+drop policy if exists "family_message_broadcast_read" on realtime.messages;
+drop policy if exists "family_message_broadcast_send" on realtime.messages;
+
+create policy "family_message_broadcast_read"
+on realtime.messages
+for select
+to authenticated
+using (
+  extension = 'broadcast'
+  and exists (
+    select 1 from public.profiles
+    where id = auth.uid()
+      and realtime.topic() = 'family:' || family_id::text || ':messages'
+  )
+);
+
+create policy "family_message_broadcast_send"
+on realtime.messages
+for insert
+to authenticated
+with check (
+  extension = 'broadcast'
+  and exists (
+    select 1 from public.profiles
+    where id = auth.uid()
+      and realtime.topic() = 'family:' || family_id::text || ':messages'
+  )
+);
 
 -- Supabase Realtime Broadcast is the transport. It must carry ciphertext only.
--- Recommended private channel names use the family UUID, for example:
--- private:family:<family-id>:messages
--- Configure Realtime Authorization for private channels in Supabase Dashboard.
 -- This migration intentionally creates no messages table and no message-body column.
-
 notify pgrst, 'reload schema';
