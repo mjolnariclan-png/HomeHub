@@ -41,6 +41,7 @@ const store = {
     schoolSubjects: [],
     schoolGrades: [],
     schoolModeSchedules: [],
+    messagingTransportReady: false,
     transactions: [],
     notifications: [],
     badges: [],
@@ -251,7 +252,7 @@ function isSchoolModeActive() {
 function canAccessPage(page, user = store.user) {
     if (isChildAccount(user) && isSchoolModeActive()) return ['school', 'calendar'].includes(page);
     if (!isChildAccount(user)) return true;
-    const childAllowedPages = new Set(['todo', 'chores', 'store', 'admin', 'calendar', 'school', 'leaderboard']);
+    const childAllowedPages = new Set(['todo', 'chores', 'store', 'admin', 'calendar', 'school', 'messages', 'leaderboard']);
     return childAllowedPages.has(page);
 }
 
@@ -1273,6 +1274,7 @@ function renderPage(page) {
         case 'store': renderStore(container); break;
         case 'calendar': renderCalendar(container); break;
         case 'school': renderSchool(container); break;
+        case 'messages': renderMessages(container); break;
         case 'leaderboard': renderLeaderboard(container); break;
         case 'budget': renderBudget(container); break;
         case 'admin': renderAdmin(container); break;
@@ -5678,6 +5680,24 @@ async function saveSchoolMode(studentId) {
     const { error } = await supabaseClient.from('school_mode_schedules').upsert({ student_id: studentId, start_time: startTime, end_time: endTime, active_days: activeDays, is_enabled: document.getElementById('schoolModeEnabled').checked }, { onConflict: 'student_id' });
     if (error) return alert(`Unable to save School Mode: ${error.message}`);
     await loadSchoolData(); closeModal(); renderPage('school');
+}
+
+async function renderMessages(container) {
+    container.innerHTML = '<div class="fade-in"><div class="card"><div class="card-title">💬 Messages</div><div style="color:var(--text-muted);margin-top:12px;">Checking private messaging setup...</div></div></div>';
+
+    const { error } = await supabaseClient.from('message_devices').select('id').limit(1);
+    store.messagingTransportReady = !error;
+    if (store.currentPage !== 'messages') return;
+
+    container.innerHTML = `
+        <div class="fade-in">
+            <div class="card">
+                <div class="card-header"><div class="card-title">💬 Private Messages</div></div>
+                ${store.messagingTransportReady
+                    ? '<div style="color:var(--text-muted);">The device-key backend is ready. Private conversation delivery still requires Supabase Realtime Broadcast authorization before message sending can be enabled.</div>'
+                    : '<div style="color:var(--text-muted);">Private messaging is not configured yet. Run the messaging transport SQL script in Supabase, then refresh this page.</div>'}
+            </div>
+        </div>`;
 }
 
 
