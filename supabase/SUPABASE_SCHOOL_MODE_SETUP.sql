@@ -19,12 +19,12 @@ drop policy if exists "school_mode_read_linked_student" on public.school_mode_sc
 drop policy if exists "school_mode_manage_adults" on public.school_mode_schedules;
 create policy "school_mode_read_linked_student" on public.school_mode_schedules for select to authenticated using (
   student_id in (select id from public.students where profile_id = auth.uid())
-  or exists (select 1 from public.students s join public.profiles p on p.family_id = s.family_id where s.id = student_id and p.id = auth.uid() and p.role in ('admin', 'adult'))
+  or exists (select 1 from public.students s join public.profiles p on p.family_id = s.family_id where s.id = student_id and p.id = auth.uid() and p.role = 'admin')
 );
 create policy "school_mode_manage_adults" on public.school_mode_schedules for all to authenticated using (
-  exists (select 1 from public.students s join public.profiles p on p.family_id = s.family_id where s.id = student_id and p.id = auth.uid() and p.role in ('admin', 'adult'))
+  exists (select 1 from public.students s join public.profiles p on p.family_id = s.family_id where s.id = student_id and p.id = auth.uid() and p.role = 'admin')
 ) with check (
-  exists (select 1 from public.students s join public.profiles p on p.family_id = s.family_id where s.id = student_id and p.id = auth.uid() and p.role in ('admin', 'adult'))
+  exists (select 1 from public.students s join public.profiles p on p.family_id = s.family_id where s.id = student_id and p.id = auth.uid() and p.role = 'admin')
 );
 
 notify pgrst, 'reload schema';

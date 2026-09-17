@@ -58,37 +58,37 @@ create policy "students_read_family" on public.students for select to authentica
   family_id in (select family_id from public.profiles where id = auth.uid())
   and (
     profile_id = auth.uid()
-    or exists (select 1 from public.profiles where id = auth.uid() and role in ('admin', 'adult'))
+    or exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
   )
 );
 create policy "students_manage_adults" on public.students for all to authenticated using (
-  family_id in (select family_id from public.profiles where id = auth.uid() and role in ('admin', 'adult'))
+  family_id in (select family_id from public.profiles where id = auth.uid() and role = 'admin')
 ) with check (
-  family_id in (select family_id from public.profiles where id = auth.uid() and role in ('admin', 'adult'))
+  family_id in (select family_id from public.profiles where id = auth.uid() and role = 'admin')
 );
 create policy "subjects_read_family" on public.school_subjects for select to authenticated using (
   student_id in (
     select id from public.students
     where family_id in (select family_id from public.profiles where id = auth.uid())
-      and (profile_id = auth.uid() or exists (select 1 from public.profiles where id = auth.uid() and role in ('admin', 'adult')))
+      and (profile_id = auth.uid() or exists (select 1 from public.profiles where id = auth.uid() and role = 'admin'))
   )
 );
 create policy "subjects_manage_adults" on public.school_subjects for all to authenticated using (
-  student_id in (select id from public.students where family_id in (select family_id from public.profiles where id = auth.uid() and role in ('admin', 'adult')))
+  student_id in (select id from public.students where family_id in (select family_id from public.profiles where id = auth.uid() and role = 'admin'))
 ) with check (
-  student_id in (select id from public.students where family_id in (select family_id from public.profiles where id = auth.uid() and role in ('admin', 'adult')))
+  student_id in (select id from public.students where family_id in (select family_id from public.profiles where id = auth.uid() and role = 'admin'))
 );
 create policy "grades_read_family" on public.school_grades for select to authenticated using (
   student_id in (
     select id from public.students
     where family_id in (select family_id from public.profiles where id = auth.uid())
-      and (profile_id = auth.uid() or exists (select 1 from public.profiles where id = auth.uid() and role in ('admin', 'adult')))
+      and (profile_id = auth.uid() or exists (select 1 from public.profiles where id = auth.uid() and role = 'admin'))
   )
 );
 create policy "grades_manage_adults" on public.school_grades for all to authenticated using (
-  student_id in (select id from public.students where family_id in (select family_id from public.profiles where id = auth.uid() and role in ('admin', 'adult')))
+  student_id in (select id from public.students where family_id in (select family_id from public.profiles where id = auth.uid() and role = 'admin'))
 ) with check (
-  student_id in (select id from public.students where family_id in (select family_id from public.profiles where id = auth.uid() and role in ('admin', 'adult')))
+  student_id in (select id from public.students where family_id in (select family_id from public.profiles where id = auth.uid() and role = 'admin'))
 );
 
 notify pgrst, 'reload schema';
